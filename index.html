@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="referrer" content="strict-origin">
+<title>Shuffle</title>
+<style>
+  :root{
+    --stage:#000; --panel:#141416; --panel-2:#1d1d21; --line:#31313a;
+    --ink:#f4f2ee; --muted:#95949e; --lamp:#f0b429; --danger:#e06a5c;
+    --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:var(--stage);color:var(--ink);font-family:var(--sans)}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  button:focus-visible{outline:2px solid var(--lamp);outline-offset:2px}
+
+  /* gate */
+  #gate{position:fixed;inset:0;display:grid;place-items:center;padding:28px;text-align:center;z-index:10}
+  #gate .inner{max-width:32ch}
+  #gate h1{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
+  #gate p{margin-top:12px;font-size:14px;line-height:1.6;color:var(--muted)}
+  .primary{margin-top:22px;padding:13px 24px;border-radius:999px;background:var(--lamp);color:#15120a;font-weight:600;font-size:15px}
+  .primary:active{transform:scale(.97)}
+  .primary[disabled]{opacity:.5}
+  #gate .err{margin-top:16px;font-size:13px;line-height:1.55;color:var(--danger)}
+
+  /* feed */
+  #feed{height:100dvh;overflow-y:auto;scroll-snap-type:y mandatory;overscroll-behavior-y:contain;scrollbar-width:none;display:none}
+  #feed.on{display:block}
+  #feed::-webkit-scrollbar{display:none}
+  .reel{position:relative;height:100dvh;scroll-snap-align:start;scroll-snap-stop:always;display:flex;align-items:center;justify-content:center;background:#000}
+  .reel video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+  .reel .shade{position:absolute;inset:auto 0 0 0;height:36%;background:linear-gradient(to top,rgba(0,0,0,.72),transparent);pointer-events:none}
+
+  .load{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px;gap:10px;text-align:center;padding:20px}
+  .load .bar{width:120px;height:3px;background:rgba(255,255,255,.14);border-radius:2px;overflow:hidden;margin:0 auto}
+  .load .bar i{display:block;height:100%;width:0;background:var(--lamp)}
+
+  .meta{position:absolute;left:16px;right:88px;bottom:calc(26px + env(safe-area-inset-bottom));pointer-events:none}
+  .meta .name{font-size:15px;line-height:1.35;font-weight:500;letter-spacing:-.01em;text-shadow:0 1px 12px rgba(0,0,0,.85);word-break:break-word}
+  .meta .sub{margin-top:4px;font-size:12px;color:var(--muted);text-shadow:0 1px 10px rgba(0,0,0,.85)}
+
+  .side{position:absolute;right:12px;bottom:calc(26px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:6px}
+  .side button{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:rgba(18,18,20,.55);backdrop-filter:blur(8px)}
+  .side button:active{transform:scale(.93)}
+  .side svg{width:21px;height:21px;fill:none;stroke:var(--ink);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+  .scrub{position:absolute;left:0;right:0;bottom:0;height:26px;display:flex;align-items:flex-end}
+  .scrub .track{height:3px;width:100%;background:rgba(255,255,255,.16)}
+  .scrub .fill{height:100%;width:0;background:var(--lamp)}
+
+  .pausepip{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;opacity:0;transition:opacity .18s}
+  .reel.paused .pausepip{opacity:1}
+  .pausepip div{width:72px;height:72px;border-radius:50%;background:rgba(0,0,0,.45);display:grid;place-items:center}
+  .pausepip svg{width:28px;height:28px;fill:var(--ink)}
+
+  #top{position:fixed;top:0;left:0;right:0;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:none;align-items:center;gap:10px;z-index:5;
+       background:linear-gradient(to bottom,rgba(0,0,0,.55),transparent);pointer-events:none}
+  #top.on{display:flex}
+  #top > *{pointer-events:auto}
+  #pos{font-size:12px;color:var(--muted);text-shadow:0 1px 10px #000}
+  .chip{margin-left:auto;padding:7px 13px;border-radius:999px;background:rgba(18,18,20,.6);backdrop-filter:blur(8px);font-size:13px;font-weight:500}
+
+  #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(12px);z-index:40;
+         background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:9px 16px;font-size:13px;
+         opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;white-space:nowrap;max-width:86vw;overflow:hidden;text-overflow:ellipsis}
+  #toast.show{opacity:1;transform:translateX(-50%)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="inner">
+    <h1 id="gateTitle">Shuffle</h1>
+    <p id="gateText">Signs in to Drive, shuffles your folder, and plays it as a feed. Nothing is saved on this device — closing the tab ends the session.</p>
+    <button class="primary" id="signin">Connect Drive</button>
+    <div class="err" id="gateErr"></div>
+  </div>
+</div>
+
+<div id="top">
+  <div id="pos"></div>
+  <button class="chip" id="reshuffle">Reshuffle</button>
+</div>
+
+<div id="feed" aria-label="Video feed"></div>
+<div id="toast"></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+(() => {
+"use strict";
+
+/* ============================================================
+   SET THESE TWO VALUES BEFORE HOSTING
+   ============================================================ */
+const CLIENT_ID = "PASTE_YOUR_OAUTH_CLIENT_ID_HERE.apps.googleusercontent.com";
+const FOLDER_ID = "";   // Drive folder ID. Leave "" to pull every video in the account.
+/* ============================================================ */
+
+const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const $ = s => document.querySelector(s);
+const feed = $("#feed"), gate = $("#gate");
+let token = null, files = [], muted = true, tokenClient = null;
+
+const ICON = {
+  sound:'<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+  mute :'<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="m16 9 5 6M21 9l-5 6"/></svg>',
+  next :'<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m6 13 6 6 6-6"/></svg>',
+  play :'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
+};
+const fmtSize = b => !b ? "" : b >= 1073741824 ? (b/1073741824).toFixed(1)+" GB"
+                  : b >= 1048576 ? Math.round(b/1048576)+" MB" : Math.round(b/1024)+" KB";
+
+let toastTimer;
+function toast(msg){
+  const el = $("#toast"); el.textContent = msg; el.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 3000);
+}
+function fail(msg){ $("#gateErr").textContent = msg; $("#signin").disabled = false; $("#signin").textContent = "Try again"; }
+
+/* ---------------- auth ---------------- */
+$("#signin").onclick = () => {
+  if (CLIENT_ID.startsWith("PASTE_")) return fail("No client ID set. Open this file and paste your OAuth client ID into CLIENT_ID near the top of the script.");
+  if (!window.google?.accounts?.oauth2) return fail("Google's sign-in script didn't load. Check the connection and reload.");
+  $("#signin").disabled = true; $("#signin").textContent = "Waiting for Google…"; $("#gateErr").textContent = "";
+
+  tokenClient = tokenClient || google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPE,
+    callback: res => {
+      if (res.error) return fail("Sign-in was cancelled or refused.");
+      token = res.access_token;
+      loadFiles();
+    },
+    error_callback: () => fail("The sign-in window was blocked or closed. Allow pop-ups for this page and try again.")
+  });
+  tokenClient.requestAccessToken({ prompt: "" });
+};
+
+async function api(url){
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (r.status === 401){ token = null; throw new Error("Session expired. Reload and sign in again."); }
+  if (!r.ok) throw new Error("Drive returned " + r.status + ".");
+  return r;
+}
+
+/* ---------------- file list ---------------- */
+async function loadFiles(){
+  $("#signin").textContent = "Reading folder…";
+  try{
+    const parts = ["mimeType contains 'video/'", "trashed = false"];
+    if (FOLDER_ID) parts.push(`'${FOLDER_ID}' in parents`);
+    const q = encodeURIComponent(parts.join(" and "));
+    files = [];
+    let pageToken = "";
+    do{
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}`
+                + `&fields=nextPageToken,files(id,name,size,mimeType)&pageSize=200&orderBy=name`
+                + `&supportsAllDrives=true&includeItemsFromAllDrives=true`
+                + (pageToken ? `&pageToken=${pageToken}` : "");
+      const data = await (await api(url)).json();
+      files.push(...(data.files || []));
+      pageToken = data.nextPageToken || "";
+    } while (pageToken && files.length < 2000);
+
+    if (!files.length){
+      return fail(FOLDER_ID ? "No videos in that folder. Check the folder ID." : "No videos found in this account.");
+    }
+    shuffle();
+    gate.style.display = "none";
+    feed.classList.add("on");
+    $("#top").classList.add("on");
+    render();
+  }catch(e){ fail(e.message); }
+}
+
+function shuffle(){
+  for (let i = files.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [files[i], files[j]] = [files[j], files[i]];
+  }
+}
+$("#reshuffle").onclick = () => {
+  shuffle(); render(); feed.scrollTop = 0; toast("Reshuffled");
+};
+
+/* ---------------- feed ---------------- */
+function reelEl(f, n){
+  const el = document.createElement("section");
+  el.className = "reel"; el.dataset.id = f.id;
+  el.innerHTML = `
+    <video playsinline loop preload="none" muted></video>
+    <div class="load"><div><div class="bar"><i></i></div><div class="pct" style="margin-top:8px"></div></div></div>
+    <div class="shade"></div>
+    <div class="meta"><div class="name"></div><div class="sub"></div></div>
+    <div class="side">
+      <button class="snd" aria-label="Sound">${muted ? ICON.mute : ICON.sound}</button>
+      <button class="nxt" aria-label="Next">${ICON.next}</button>
+    </div>
+    <div class="pausepip"><div>${ICON.play}</div></div>
+    <div class="scrub"><div class="track"><div class="fill"></div></div></div>`;
+
+  el.querySelector(".name").textContent = f.name.replace(/\.[^.]+$/, "");
+  el.querySelector(".sub").textContent = [fmtSize(+f.size), `${n + 1} of ${files.length}`].filter(Boolean).join(" · ");
+  el.querySelector(".pct").textContent = "Loading";
+
+  const v = el.querySelector("video");
+  v.muted = muted;
+
+  el.addEventListener("click", ev => {
+    if (ev.target.closest("button") || ev.target.closest(".scrub")) return;
+    if (!v.src) return;
+    if (v.paused){ v.play().catch(()=>{}); el.classList.remove("paused"); }
+    else { v.pause(); el.classList.add("paused"); }
+  });
+  el.querySelector(".snd").onclick = () => {
+    muted = !muted;
+    document.querySelectorAll(".reel video").forEach(x => x.muted = muted);
+    document.querySelectorAll(".reel .snd").forEach(b => b.innerHTML = muted ? ICON.mute : ICON.sound);
+  };
+  el.querySelector(".nxt").onclick = () => feed.scrollBy({ top: feed.clientHeight, behavior: "smooth" });
+
+  const scrub = el.querySelector(".scrub"), fill = el.querySelector(".fill");
+  v.addEventListener("timeupdate", () => { if (v.duration) fill.style.width = (v.currentTime / v.duration * 100) + "%"; });
+  scrub.addEventListener("click", ev => {
+    const r = scrub.getBoundingClientRect();
+    if (v.duration) v.currentTime = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * v.duration;
+  });
+  return el;
+}
+
+function render(){
+  feed.innerHTML = "";
+  files.forEach((f, n) => feed.appendChild(reelEl(f, n)));
+  updatePos();
+  attachNear(0);
+  observe();
+}
+
+let io;
+function observe(){
+  io?.disconnect();
+  io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      const el = e.target, v = el.querySelector("video");
+      if (e.isIntersecting && e.intersectionRatio > .6){
+        if (v.src){ el.classList.remove("paused"); v.play().catch(() => el.classList.add("paused")); }
+      } else v.pause();
+    });
+  }, { root: feed, threshold: [0, .6] });
+  [...feed.children].forEach(c => io.observe(c));
+
+  feed.onscroll = () => {
+    const i = Math.round(feed.scrollTop / feed.clientHeight);
+    updatePos(i);
+    attachNear(i);
+  };
+}
+function updatePos(i){
+  const n = i ?? Math.round(feed.scrollTop / feed.clientHeight);
+  $("#pos").textContent = `${Math.min(n + 1, files.length)} / ${files.length}`;
+}
+
+/* keep the current reel and the next one in memory; drop everything else */
+function attachNear(i){
+  [...feed.children].forEach((el, n) => {
+    if (n === i || n === i + 1) fetchInto(el);
+    else if (Math.abs(n - i) > 1) release(el);
+  });
+}
+
+const inflight = new Set();
+async function fetchInto(el){
+  const v = el.querySelector("video");
+  if (v.src || inflight.has(el.dataset.id)) return;
+  if (!token){ el.querySelector(".pct").textContent = "Session expired — reload"; return; }
+  const id = el.dataset.id;
+  inflight.add(id);
+  const bar = el.querySelector(".bar i"), pct = el.querySelector(".pct");
+  try{
+    const r = await api(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&supportsAllDrives=true`);
+    const total = +r.headers.get("content-length") || 0;
+    const reader = r.body.getReader();
+    const chunks = []; let got = 0;
+    for(;;){
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); got += value.length;
+      if (total){ const p = Math.round(got / total * 100); bar.style.width = p + "%"; pct.textContent = p + "%"; }
+      else pct.textContent = fmtSize(got);
+    }
+    const blob = new Blob(chunks, { type: el.dataset.type || "video/mp4" });
+    v.src = URL.createObjectURL(blob);
+    v.muted = muted;
+    el.querySelector(".load").style.display = "none";
+    const i = Math.round(feed.scrollTop / feed.clientHeight);
+    if ([...feed.children][i] === el) v.play().catch(() => el.classList.add("paused"));
+  }catch(e){
+    pct.textContent = e.message || "Couldn't load this one";
+    bar.style.background = "var(--danger)"; bar.style.width = "100%";
+  }finally{ inflight.delete(id); }
+}
+
+function release(el){
+  const v = el.querySelector("video");
+  if (!v.src) return;
+  v.pause();
+  URL.revokeObjectURL(v.src);
+  v.removeAttribute("src"); v.load();
+  const l = el.querySelector(".load");
+  l.style.display = ""; l.querySelector(".bar i").style.width = "0";
+  l.querySelector(".pct").textContent = "Loading";
+}
+
+/* ---------------- keyboard ---------------- */
+addEventListener("keydown", e => {
+  if (!feed.classList.contains("on")) return;
+  const h = feed.clientHeight;
+  if (e.key === "ArrowDown" || e.key === "PageDown"){ e.preventDefault(); feed.scrollBy({ top:h, behavior:"smooth" }); }
+  if (e.key === "ArrowUp"   || e.key === "PageUp"  ){ e.preventDefault(); feed.scrollBy({ top:-h, behavior:"smooth" }); }
+  if (e.key === " "){ e.preventDefault(); [...feed.children][Math.round(feed.scrollTop / h)]?.click(); }
+});
+})();
+</script>
+</body>
+</html>
