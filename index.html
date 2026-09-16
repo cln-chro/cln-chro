@@ -247,7 +247,7 @@ function reelEl(f, n){
 function wireVideo(el, v){
   v.muted = muted;
   v.addEventListener("error", () => {
-    if (el._releasing) return;                     // we cleared the src on purpose
+    if (!v.src) return;                            // blank element, not a real failure
     const code = v.error?.code;
     showError(el, code === 4
       ? "This format can't be played in Chrome. Convert it to H.264 MP4."
@@ -311,15 +311,20 @@ async function load(el){
 function release(el){
   el._ctrl?.abort();
   el._ctrl = null;
-  const v = el.querySelector("video");
-  v.pause();
-  if (el._url){
-    el._releasing = true;
-    v.removeAttribute("src"); v.load();
-    URL.revokeObjectURL(el._url);
-    el._url = null;
-    setTimeout(() => { el._releasing = false; }, 0);
-  }
+
+  /* Swap in a clean, unused <video> rather than blanking the src.
+     Calling load() on an empty source makes Chrome fire a spurious
+     "error 4" that used to get painted onto the reel. */
+  const old = el.querySelector("video");
+  old.pause();
+  const blank = document.createElement("video");
+  blank.playsInline = true; blank.loop = true; blank.muted = muted;
+  blank.setAttribute("playsinline", ""); blank.setAttribute("webkit-playsinline", "");
+  el.replaceChild(blank, old);
+  old.removeAttribute("src");
+
+  if (el._url){ URL.revokeObjectURL(el._url); el._url = null; }
+
   const l = el.querySelector(".load");
   l.classList.remove("hide", "err");
   l.querySelector(".bar i").style.width = "0";
@@ -374,7 +379,7 @@ function render(){
   want();
 }
 
-function updatePos(i){ $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v4`; }
+function updatePos(i){ $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v5`; }
 
 /* React only once scrolling settles, so a fast swipe-through
    doesn't kick off a download for every reel it passes. */
@@ -398,3 +403,4 @@ addEventListener("keydown", e => {
 </script>
 </body>
 </html>
+
