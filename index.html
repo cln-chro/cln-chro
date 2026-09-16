@@ -16,7 +16,6 @@
   button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   button:focus-visible{outline:2px solid var(--lamp);outline-offset:2px}
 
-  /* gate */
   #gate{position:fixed;inset:0;display:grid;place-items:center;padding:28px;text-align:center;z-index:10}
   #gate .inner{max-width:32ch}
   #gate h1{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
@@ -26,7 +25,6 @@
   .primary[disabled]{opacity:.5}
   #gate .err{margin-top:16px;font-size:13px;line-height:1.55;color:var(--danger)}
 
-  /* feed */
   #feed{height:100dvh;overflow-y:auto;scroll-snap-type:y mandatory;overscroll-behavior-y:contain;scrollbar-width:none;display:none}
   #feed.on{display:block}
   #feed::-webkit-scrollbar{display:none}
@@ -34,9 +32,15 @@
   .reel video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
   .reel .shade{position:absolute;inset:auto 0 0 0;height:36%;background:linear-gradient(to top,rgba(0,0,0,.72),transparent);pointer-events:none}
 
-  .load{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px;gap:10px;text-align:center;padding:20px}
-  .load .bar{width:120px;height:3px;background:rgba(255,255,255,.14);border-radius:2px;overflow:hidden;margin:0 auto}
-  .load .bar i{display:block;height:100%;width:0;background:var(--lamp)}
+  .load{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px;text-align:center;padding:24px}
+  .load.hide{display:none}
+  .load .bar{width:130px;height:3px;background:rgba(255,255,255,.14);border-radius:2px;overflow:hidden;margin:0 auto}
+  .load .bar i{display:block;height:100%;width:0;background:var(--lamp);transition:width .15s linear}
+  .load .pct{margin-top:9px;line-height:1.5}
+  .load.err .bar{display:none}
+  .load.err .pct{color:var(--danger);max-width:28ch}
+  .load .retry{margin-top:12px;padding:8px 16px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);font-size:13px;display:none}
+  .load.err .retry{display:inline-block}
 
   .meta{position:absolute;left:16px;right:88px;bottom:calc(26px + env(safe-area-inset-bottom));pointer-events:none}
   .meta .name{font-size:15px;line-height:1.35;font-weight:500;letter-spacing:-.01em;text-shadow:0 1px 12px rgba(0,0,0,.85);word-break:break-word}
@@ -74,8 +78,8 @@
 
 <div id="gate">
   <div class="inner">
-    <h1 id="gateTitle">Shuffle</h1>
-    <p id="gateText">Signs in to Drive, shuffles your folder, and plays it as a feed. Nothing is saved on this device — closing the tab ends the session.</p>
+    <h1>Shuffle</h1>
+    <p>Signs in to Drive, shuffles your folder, and plays it as a feed. Nothing is saved on this device — closing the tab ends the session.</p>
     <button class="primary" id="signin">Connect Drive</button>
     <div class="err" id="gateErr"></div>
   </div>
@@ -95,16 +99,18 @@
 "use strict";
 
 /* ============================================================
-   SET THESE TWO VALUES BEFORE HOSTING
+   SET THESE TWO VALUES
    ============================================================ */
 const CLIENT_ID = "912858917708-82lcot5nfb21r8lncfik2q0mvg6heovu.apps.googleusercontent.com";
-const FOLDER_ID = "1XUdO_a3nphazi95miRNlcJvWIu0wyUSH";
+const FOLDER_ID = "1XUdO_a3nphazi95miRNlcJvWIu0wyUSH";   // Drive folder ID
 /* ============================================================ */
 
 const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const $ = s => document.querySelector(s);
 const feed = $("#feed"), gate = $("#gate");
 let token = null, files = [], muted = true, tokenClient = null;
+let current = 0;                 // index of the reel on screen
+let queue = Promise.resolve();   // serialises downloads: one at a time
 
 const ICON = {
   sound:'<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
@@ -124,26 +130,22 @@ function fail(msg){ $("#gateErr").textContent = msg; $("#signin").disabled = fal
 
 /* ---------------- auth ---------------- */
 $("#signin").onclick = () => {
-  if (CLIENT_ID.startsWith("PASTE_")) return fail("No client ID set. Open this file and paste your OAuth client ID into CLIENT_ID near the top of the script.");
+  if (CLIENT_ID.startsWith("PASTE_")) return fail("No client ID set — paste yours into CLIENT_ID near the top of the file.");
   if (!window.google?.accounts?.oauth2) return fail("Google's sign-in script didn't load. Check the connection and reload.");
   $("#signin").disabled = true; $("#signin").textContent = "Waiting for Google…"; $("#gateErr").textContent = "";
 
   tokenClient = tokenClient || google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPE,
-    callback: res => {
-      if (res.error) return fail("Sign-in was cancelled or refused.");
-      token = res.access_token;
-      loadFiles();
-    },
-    error_callback: () => fail("The sign-in window was blocked or closed. Allow pop-ups for this page and try again.")
+    client_id: CLIENT_ID, scope: SCOPE,
+    callback: res => { if (res.error) return fail("Sign-in was cancelled."); token = res.access_token; loadFiles(); },
+    error_callback: () => fail("The sign-in window was blocked or closed. Allow pop-ups and try again.")
   });
   tokenClient.requestAccessToken({ prompt: "" });
 };
 
-async function api(url){
-  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
-  if (r.status === 401){ token = null; throw new Error("Session expired. Reload and sign in again."); }
+async function api(url, signal){
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token }, signal });
+  if (r.status === 401){ token = null; throw new Error("Session expired — reload and sign in again."); }
+  if (r.status === 403) throw new Error("Drive is rate-limiting. Wait a moment and retry.");
   if (!r.ok) throw new Error("Drive returned " + r.status + ".");
   return r;
 }
@@ -155,8 +157,7 @@ async function loadFiles(){
     const parts = ["mimeType contains 'video/'", "trashed = false"];
     if (FOLDER_ID) parts.push(`'${FOLDER_ID}' in parents`);
     const q = encodeURIComponent(parts.join(" and "));
-    files = [];
-    let pageToken = "";
+    files = []; let pageToken = "";
     do{
       const url = `https://www.googleapis.com/drive/v3/files?q=${q}`
                 + `&fields=nextPageToken,files(id,name,size,mimeType)&pageSize=200&orderBy=name`
@@ -167,9 +168,7 @@ async function loadFiles(){
       pageToken = data.nextPageToken || "";
     } while (pageToken && files.length < 2000);
 
-    if (!files.length){
-      return fail(FOLDER_ID ? "No videos in that folder. Check the folder ID." : "No videos found in this account.");
-    }
+    if (!files.length) return fail(FOLDER_ID ? "No videos in that folder — check the folder ID." : "No videos found in this account.");
     shuffle();
     gate.style.display = "none";
     feed.classList.add("on");
@@ -185,16 +184,25 @@ function shuffle(){
   }
 }
 $("#reshuffle").onclick = () => {
-  shuffle(); render(); feed.scrollTop = 0; toast("Reshuffled");
+  [...feed.children].forEach(release);
+  shuffle(); feed.scrollTop = 0; current = 0; render(); toast("Reshuffled");
 };
 
-/* ---------------- feed ---------------- */
+/* ---------------- building a reel ---------------- */
 function reelEl(f, n){
   const el = document.createElement("section");
-  el.className = "reel"; el.dataset.id = f.id;
+  el.className = "reel";
+  el.dataset.id = f.id;
+  el.dataset.mime = f.mimeType || "video/mp4";
   el.innerHTML = `
-    <video playsinline loop preload="none" muted></video>
-    <div class="load"><div><div class="bar"><i></i></div><div class="pct" style="margin-top:8px"></div></div></div>
+    <video playsinline loop muted preload="none"></video>
+    <div class="load">
+      <div>
+        <div class="bar"><i></i></div>
+        <div class="pct">Waiting…</div>
+        <button class="retry">Retry</button>
+      </div>
+    </div>
     <div class="shade"></div>
     <div class="meta"><div class="name"></div><div class="sub"></div></div>
     <div class="side">
@@ -206,23 +214,35 @@ function reelEl(f, n){
 
   el.querySelector(".name").textContent = f.name.replace(/\.[^.]+$/, "");
   el.querySelector(".sub").textContent = [fmtSize(+f.size), `${n + 1} of ${files.length}`].filter(Boolean).join(" · ");
-  el.querySelector(".pct").textContent = "Loading";
 
   const v = el.querySelector("video");
   v.muted = muted;
 
+  /* surface decode failures instead of swallowing them */
+  v.addEventListener("error", () => {
+    if (el._releasing) return;                     // we cleared the src on purpose
+    const code = v.error?.code;
+    showError(el, code === 4
+      ? "This format can't be played in Chrome. Convert it to H.264 MP4."
+      : "Playback failed (media error " + (code ?? "?") + ") — tap Retry.");
+  });
+
   el.addEventListener("click", ev => {
     if (ev.target.closest("button") || ev.target.closest(".scrub")) return;
-    if (!v.src) return;
-    if (v.paused){ v.play().catch(()=>{}); el.classList.remove("paused"); }
-    else { v.pause(); el.classList.add("paused"); }
+    if (!el._url){ want(); return; }
+    if (!v.paused){ v.pause(); el.classList.add("paused"); return; }
+    tryPlay(el).then(() => {
+      if (v.paused){ release(el); want(); }      // still stuck — reload it from scratch
+    });
   });
+
+  el.querySelector(".retry").onclick = ev => { ev.stopPropagation(); release(el); want(); };
+  el.querySelector(".nxt").onclick = () => feed.scrollBy({ top: feed.clientHeight, behavior: "smooth" });
   el.querySelector(".snd").onclick = () => {
     muted = !muted;
     document.querySelectorAll(".reel video").forEach(x => x.muted = muted);
     document.querySelectorAll(".reel .snd").forEach(b => b.innerHTML = muted ? ICON.mute : ICON.sound);
   };
-  el.querySelector(".nxt").onclick = () => feed.scrollBy({ top: feed.clientHeight, behavior: "smooth" });
 
   const scrub = el.querySelector(".scrub"), fill = el.querySelector(".fill");
   v.addEventListener("timeupdate", () => { if (v.duration) fill.style.width = (v.currentTime / v.duration * 100) + "%"; });
@@ -233,56 +253,25 @@ function reelEl(f, n){
   return el;
 }
 
-function render(){
-  feed.innerHTML = "";
-  files.forEach((f, n) => feed.appendChild(reelEl(f, n)));
-  updatePos();
-  attachNear(0);
-  observe();
+function showError(el, msg){
+  const l = el.querySelector(".load");
+  l.classList.remove("hide"); l.classList.add("err");
+  l.querySelector(".pct").textContent = msg;
 }
 
-let io;
-function observe(){
-  io?.disconnect();
-  io = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      const el = e.target, v = el.querySelector("video");
-      if (e.isIntersecting && e.intersectionRatio > .6){
-        if (v.src){ el.classList.remove("paused"); v.play().catch(() => el.classList.add("paused")); }
-      } else v.pause();
-    });
-  }, { root: feed, threshold: [0, .6] });
-  [...feed.children].forEach(c => io.observe(c));
+/* ---------------- load / release ---------------- */
+async function load(el){
+  if (el._url || el._ctrl) return;                 // already loaded or in flight
+  if (!token){ showError(el, "Session expired — reload."); return; }
 
-  feed.onscroll = () => {
-    const i = Math.round(feed.scrollTop / feed.clientHeight);
-    updatePos(i);
-    attachNear(i);
-  };
-}
-function updatePos(i){
-  const n = i ?? Math.round(feed.scrollTop / feed.clientHeight);
-  $("#pos").textContent = `${Math.min(n + 1, files.length)} / ${files.length}`;
-}
+  const ctrl = new AbortController();
+  el._ctrl = ctrl;
+  const l  = el.querySelector(".load");
+  const bar = l.querySelector(".bar i"), pct = l.querySelector(".pct");
+  l.classList.remove("hide", "err"); bar.style.width = "0"; pct.textContent = "Loading…";
 
-/* keep the current reel and the next one in memory; drop everything else */
-function attachNear(i){
-  [...feed.children].forEach((el, n) => {
-    if (n === i || n === i + 1) fetchInto(el);
-    else if (Math.abs(n - i) > 1) release(el);
-  });
-}
-
-const inflight = new Set();
-async function fetchInto(el){
-  const v = el.querySelector("video");
-  if (v.src || inflight.has(el.dataset.id)) return;
-  if (!token){ el.querySelector(".pct").textContent = "Session expired — reload"; return; }
-  const id = el.dataset.id;
-  inflight.add(id);
-  const bar = el.querySelector(".bar i"), pct = el.querySelector(".pct");
   try{
-    const r = await api(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&supportsAllDrives=true`);
+    const r = await api(`https://www.googleapis.com/drive/v3/files/${el.dataset.id}?alt=media&supportsAllDrives=true`, ctrl.signal);
     const total = +r.headers.get("content-length") || 0;
     const reader = r.body.getReader();
     const chunks = []; let got = 0;
@@ -293,28 +282,100 @@ async function fetchInto(el){
       if (total){ const p = Math.round(got / total * 100); bar.style.width = p + "%"; pct.textContent = p + "%"; }
       else pct.textContent = fmtSize(got);
     }
-    const blob = new Blob(chunks, { type: el.dataset.type || "video/mp4" });
-    v.src = URL.createObjectURL(blob);
+    if (ctrl.signal.aborted) return;
+
+    const v = el.querySelector("video");
+    el._url = URL.createObjectURL(new Blob(chunks, { type: el.dataset.mime }));
+    v.src = el._url;
     v.muted = muted;
-    el.querySelector(".load").style.display = "none";
-    const i = Math.round(feed.scrollTop / feed.clientHeight);
-    if ([...feed.children][i] === el) v.play().catch(() => el.classList.add("paused"));
+    v.load();
+    l.classList.add("hide");
+    if (indexOf(el) === current) tryPlay(el);
   }catch(e){
-    pct.textContent = e.message || "Couldn't load this one";
-    bar.style.background = "var(--danger)"; bar.style.width = "100%";
-  }finally{ inflight.delete(id); }
+    if (e.name === "AbortError") return;           // we cancelled it on purpose
+    showError(el, e.message || "Couldn't load this one.");
+  }finally{
+    el._ctrl = null;
+  }
 }
 
 function release(el){
+  el._ctrl?.abort();
+  el._ctrl = null;
   const v = el.querySelector("video");
-  if (!v.src) return;
   v.pause();
-  URL.revokeObjectURL(v.src);
-  v.removeAttribute("src"); v.load();
+  if (el._url){
+    el._releasing = true;
+    v.removeAttribute("src"); v.load();
+    URL.revokeObjectURL(el._url);
+    el._url = null;
+    setTimeout(() => { el._releasing = false; }, 0);
+  }
   const l = el.querySelector(".load");
-  l.style.display = ""; l.querySelector(".bar i").style.width = "0";
-  l.querySelector(".pct").textContent = "Loading";
+  l.classList.remove("hide", "err");
+  l.querySelector(".bar i").style.width = "0";
+  l.querySelector(".pct").textContent = "Waiting…";
+  el.classList.remove("paused");
 }
+
+async function tryPlay(el, attempt = 0){
+  const v = el.querySelector("video");
+  if (indexOf(el) !== current) return;            // it's not on screen any more
+  try{
+    await v.play();
+    el.classList.remove("paused");
+    return;
+  }catch(e){
+    /* AbortError = something paused it mid-request; NotAllowedError = autoplay refused.
+       Both are recoverable: wait a beat, go muted, and try again. */
+    if ((e.name === "AbortError" || e.name === "NotAllowedError") && attempt < 3){
+      v.muted = true;
+      await new Promise(r => setTimeout(r, 200));
+      return tryPlay(el, attempt + 1);
+    }
+    el.classList.add("paused");
+    showError(el, `Wouldn't play: ${e.name}. ready ${v.readyState}, err ${v.error?.code ?? "none"}`);
+  }
+}
+
+const indexOf = el => [...feed.children].indexOf(el);
+
+/* Keep exactly two videos alive: the current one and the next.
+   Everything else is aborted and freed, so decoders never pile up. */
+function want(){
+  const kids = [...feed.children];
+  kids.forEach((el, n) => {
+    const keep = (n === current || n === current + 1);
+    if (!keep) release(el);
+    if (n !== current) el.querySelector("video").pause();
+  });
+  // download current first, then the next one — never in parallel
+  queue = queue.then(() => kids[current] && load(kids[current]))
+               .then(() => kids[current + 1] && load(kids[current + 1]))
+               .catch(() => {});
+  const cur = kids[current];
+  if (cur?._url) tryPlay(cur);
+}
+
+function render(){
+  feed.innerHTML = "";
+  files.forEach((f, n) => feed.appendChild(reelEl(f, n)));
+  current = 0;
+  updatePos(0);
+  want();
+}
+
+function updatePos(i){ $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length}`; }
+
+/* React only once scrolling settles, so a fast swipe-through
+   doesn't kick off a download for every reel it passes. */
+let settle;
+feed.addEventListener("scroll", () => {
+  const i = Math.round(feed.scrollTop / feed.clientHeight);
+  if (i !== current){ current = i; updatePos(i); }
+  clearTimeout(settle);
+  settle = setTimeout(want, 160);   // act only once the snap has settled
+});
 
 /* ---------------- keyboard ---------------- */
 addEventListener("keydown", e => {
@@ -322,7 +383,7 @@ addEventListener("keydown", e => {
   const h = feed.clientHeight;
   if (e.key === "ArrowDown" || e.key === "PageDown"){ e.preventDefault(); feed.scrollBy({ top:h, behavior:"smooth" }); }
   if (e.key === "ArrowUp"   || e.key === "PageUp"  ){ e.preventDefault(); feed.scrollBy({ top:-h, behavior:"smooth" }); }
-  if (e.key === " "){ e.preventDefault(); [...feed.children][Math.round(feed.scrollTop / h)]?.click(); }
+  if (e.key === " "){ e.preventDefault(); [...feed.children][current]?.click(); }
 });
 })();
 </script>
