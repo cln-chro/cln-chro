@@ -27,3 +27,422 @@
 
   #feed{height:100dvh;overflow-y:auto;scroll-snap-type:y mandatory;overscroll-behavior-y:contain;scrollbar-width:none;display:none}
   #feed.on{display:block}
+  #feed::-webkit-scrollbar{display:none}
+  .reel{position:relative;height:100dvh;scroll-snap-align:start;scroll-snap-stop:always;display:flex;align-items:center;justify-content:center;background:#000}
+  .reel video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+  .reel .shade{position:absolute;inset:auto 0 0 0;height:36%;background:linear-gradient(to top,rgba(0,0,0,.72),transparent);pointer-events:none}
+
+  .load{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px;text-align:center;padding:24px}
+  .load.hide{display:none}
+  .load .bar{width:130px;height:3px;background:rgba(255,255,255,.14);border-radius:2px;overflow:hidden;margin:0 auto}
+  .load .bar i{display:block;height:100%;width:0;background:var(--lamp);transition:width .15s linear}
+  .load .pct{margin-top:9px;line-height:1.5}
+  .load.err .bar{display:none}
+  .load.err .pct{color:var(--danger);max-width:28ch}
+  .load .retry{margin-top:12px;padding:8px 16px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);font-size:13px;display:none}
+  .load.err .retry{display:inline-block}
+
+  .meta{position:absolute;left:16px;right:88px;bottom:calc(26px + env(safe-area-inset-bottom));pointer-events:none}
+  .meta .name{font-size:15px;line-height:1.35;font-weight:500;letter-spacing:-.01em;text-shadow:0 1px 12px rgba(0,0,0,.85);word-break:break-word}
+  .meta .sub{margin-top:4px;font-size:12px;color:var(--muted);text-shadow:0 1px 10px rgba(0,0,0,.85)}
+
+  .side{position:absolute;right:12px;bottom:calc(26px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:6px}
+  .side button{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:rgba(18,18,20,.55);backdrop-filter:blur(8px)}
+  .side button:active{transform:scale(.93)}
+  .side svg{width:21px;height:21px;fill:none;stroke:var(--ink);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+  .scrub{position:absolute;left:0;right:0;bottom:0;height:26px;display:flex;align-items:flex-end}
+  .scrub .track{height:3px;width:100%;background:rgba(255,255,255,.16)}
+  .scrub .fill{height:100%;width:0;background:var(--lamp)}
+
+  .pausepip{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;opacity:0;transition:opacity .18s}
+  .reel.paused .pausepip{opacity:1}
+  .pausepip div{width:72px;height:72px;border-radius:50%;background:rgba(0,0,0,.45);display:grid;place-items:center}
+  .pausepip svg{width:28px;height:28px;fill:var(--ink)}
+
+  #top{position:fixed;top:0;left:0;right:0;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:none;align-items:center;gap:10px;z-index:5;
+       background:linear-gradient(to bottom,rgba(0,0,0,.55),transparent);pointer-events:none}
+  #top.on{display:flex}
+  #top > *{pointer-events:auto}
+  #pos{font-size:12px;color:var(--muted);text-shadow:0 1px 10px #000}
+  .chip{margin-left:auto;padding:7px 13px;border-radius:999px;background:rgba(18,18,20,.6);backdrop-filter:blur(8px);font-size:13px;font-weight:500}
+
+  #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(12px);z-index:40;
+         background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:9px 16px;font-size:13px;
+         opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;white-space:nowrap;max-width:86vw;overflow:hidden;text-overflow:ellipsis}
+  #toast.show{opacity:1;transform:translateX(-50%)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="inner">
+    <h1>Shuffle</h1>
+    <p>Signs in to Drive, shuffles your folder, and plays it as a feed. Nothing is saved on this device — closing the tab ends the session.</p>
+    <button class="primary" id="signin">Connect Drive</button>
+    <div class="err" id="gateErr"></div>
+  </div>
+</div>
+
+<div id="top">
+  <div id="pos"></div>
+  <button class="chip" id="reshuffle">Reshuffle</button>
+</div>
+
+<div id="feed" aria-label="Video feed"></div>
+<div id="toast"></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+(() => {
+"use strict";
+
+/* ============================================================
+   SET THESE TWO VALUES
+   ============================================================ */
+const CLIENT_ID = "912858917708-82lcot5nfb21r8lncfik2q0mvg6heovu.apps.googleusercontent.com";
+const FOLDER_ID = "1XUdO_a3nphazi95miRNlcJvWIu0wyUSH";   // Drive folder ID
+/* ============================================================ */
+
+const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const $ = s => document.querySelector(s);
+const feed = $("#feed"), gate = $("#gate");
+let token = null, files = [], muted = true, tokenClient = null;
+let current = 0;                 // index of the reel on screen
+let queue = Promise.resolve();   // serialises downloads: one at a time
+
+const ICON = {
+  sound:'<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+  mute :'<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="m16 9 5 6M21 9l-5 6"/></svg>',
+  next :'<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m6 13 6 6 6-6"/></svg>',
+  play :'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
+};
+const fmtSize = b => !b ? "" : b >= 1073741824 ? (b/1073741824).toFixed(1)+" GB"
+                  : b >= 1048576 ? Math.round(b/1048576)+" MB" : Math.round(b/1024)+" KB";
+
+let toastTimer;
+function toast(msg){
+  const el = $("#toast"); el.textContent = msg; el.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 3000);
+}
+function fail(msg){ $("#gateErr").textContent = msg; $("#signin").disabled = false; $("#signin").textContent = "Try again"; }
+
+/* ---------------- auth ---------------- */
+$("#signin").onclick = () => {
+  if (CLIENT_ID.startsWith("PASTE_")) return fail("No client ID set — paste yours into CLIENT_ID near the top of the file.");
+  if (!window.google?.accounts?.oauth2) return fail("Google's sign-in script didn't load. Check the connection and reload.");
+  $("#signin").disabled = true; $("#signin").textContent = "Waiting for Google…"; $("#gateErr").textContent = "";
+
+  tokenClient = tokenClient || google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID, scope: SCOPE,
+    callback: res => { if (res.error) return fail("Sign-in was cancelled."); token = res.access_token; loadFiles(); },
+    error_callback: () => fail("The sign-in window was blocked or closed. Allow pop-ups and try again.")
+  });
+  tokenClient.requestAccessToken({ prompt: "" });
+};
+
+async function api(url, signal){
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token }, signal });
+  if (r.status === 401){ token = null; throw new Error("Session expired — reload and sign in again."); }
+  if (r.status === 403) throw new Error("Drive is rate-limiting. Wait a moment and retry.");
+  if (!r.ok) throw new Error("Drive returned " + r.status + ".");
+  return r;
+}
+
+/* ---------------- file list ---------------- */
+async function loadFiles(){
+  $("#signin").textContent = "Reading folder…";
+  try{
+    const parts = ["mimeType contains 'video/'", "trashed = false"];
+    if (FOLDER_ID) parts.push(`'${FOLDER_ID}' in parents`);
+    const q = encodeURIComponent(parts.join(" and "));
+    files = []; let pageToken = "";
+    do{
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}`
+                + `&fields=nextPageToken,files(id,name,size,mimeType)&pageSize=200&orderBy=name`
+                + `&supportsAllDrives=true&includeItemsFromAllDrives=true`
+                + (pageToken ? `&pageToken=${pageToken}` : "");
+      const data = await (await api(url)).json();
+      files.push(...(data.files || []));
+      pageToken = data.nextPageToken || "";
+    } while (pageToken && files.length < 2000);
+
+    if (!files.length) return fail(FOLDER_ID ? "No videos in that folder — check the folder ID." : "No videos found in this account.");
+    shuffle();
+    gate.style.display = "none";
+    feed.classList.add("on");
+    $("#top").classList.add("on");
+    render();
+  }catch(e){ fail(e.message); }
+}
+
+function shuffle(){
+  for (let i = files.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [files[i], files[j]] = [files[j], files[i]];
+  }
+}
+
+$("#reshuffle").onclick = () => {
+  [...feed.children].forEach(release);
+  shuffle(); feed.scrollTop = 0; current = 0; render(); toast("Reshuffled");
+};
+
+/* ---------------- building a reel ---------------- */
+function reelEl(f, n){
+  const el = document.createElement("section");
+  el.className = "reel";
+  el.dataset.id = f.id;
+  el.dataset.mime = f.mimeType || "video/mp4";
+  el.innerHTML = `
+    <div class="load">
+      <div>
+        <div class="bar"><i></i></div>
+        <div class="pct">Waiting…</div>
+        <button class="retry">Retry</button>
+      </div>
+    </div>
+    <div class="shade"></div>
+    <div class="meta"><div class="name"></div><div class="sub"></div></div>
+    <div class="side">
+      <button class="snd" aria-label="Sound">${muted ? ICON.mute : ICON.sound}</button>
+      <button class="nxt" aria-label="Next">${ICON.next}</button>
+    </div>
+    <div class="pausepip"><div>${ICON.play}</div></div>
+    <div class="scrub"><div class="track"><div class="fill"></div></div></div>`;
+
+  el.querySelector(".name").textContent = f.name.replace(/\.[^.]+$/, "");
+  el.querySelector(".sub").textContent = [fmtSize(+f.size), `${n + 1} of ${files.length}`].filter(Boolean).join(" · ");
+
+  el.addEventListener("click", ev => {
+    if (ev.target.closest("button") || ev.target.closest(".scrub")) return;
+    const v = el.querySelector("video");
+    if (!el._url || !v){ want(); return; }
+    if (!v.paused){ v.pause(); el.classList.add("paused"); return; }
+    tryPlay(el).then(() => {
+      const cur = el.querySelector("video");
+      if (cur && cur.paused){ release(el); want(); }   // still stuck — reload it
+    });
+  });
+
+  el.querySelector(".retry").onclick = ev => { ev.stopPropagation(); release(el); want(); };
+  el.querySelector(".nxt").onclick = () => feed.scrollBy({ top: feed.clientHeight, behavior: "smooth" });
+  el.querySelector(".snd").onclick = () => {
+    muted = !muted;
+    document.querySelectorAll(".reel video").forEach(x => x.muted = muted);
+    document.querySelectorAll(".reel .snd").forEach(b => b.innerHTML = muted ? ICON.mute : ICON.sound);
+  };
+
+  const scrub = el.querySelector(".scrub");
+  scrub.addEventListener("click", ev => {
+    const v = el.querySelector("video");
+    if (!v) return;
+    const r = scrub.getBoundingClientRect();
+    if (v.duration) v.currentTime = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * v.duration;
+  });
+  return el;
+}
+
+function wireVideo(el, v){
+  v.muted = muted;
+  v.addEventListener("error", () => {
+    if (!v.src) return;                            // blank element, not a real failure
+    const code = v.error?.code;
+    if (code === 4 && el._bytes && el._try < labels(el).length - 1){
+      el._try++;                                   // same bytes, different label
+      attach(el);
+      return;
+    }
+    showError(el, code === 4
+      ? `Chrome can't decode this (${fmtSize(el._size || 0)} downloaded). Tap Retry.`
+      : "Playback failed (media error " + (code ?? "?") + ") — tap Retry.");
+  });
+  v.addEventListener("timeupdate", () => {
+    const fill = el.querySelector(".fill");
+    if (v.duration) fill.style.width = (v.currentTime / v.duration * 100) + "%";
+  });
+}
+
+/* Chrome rejects a blob labelled video/quicktime even when the bytes inside
+   are plain H.264 it can decode. Try the honest label, then mp4, then no
+   label at all and let Chrome sniff the container. */
+function labels(el){
+  const m = el.dataset.mime || "";
+  const out = [];
+  if (m && m !== "video/quicktime") out.push(m);
+  out.push("video/mp4", "");
+  return out;
+}
+
+function attach(el){
+  const type = labels(el)[el._try];
+  const fresh = document.createElement("video");
+  fresh.playsInline = true; fresh.loop = true; fresh.muted = muted;
+  fresh.setAttribute("playsinline", ""); fresh.setAttribute("webkit-playsinline", "");
+  el.querySelector("video")?.remove();
+  el.insertBefore(fresh, el.firstChild);
+  wireVideo(el, fresh);
+  if (el._url) URL.revokeObjectURL(el._url);
+  el._url = URL.createObjectURL(type ? new Blob(el._bytes, { type }) : new Blob(el._bytes));
+  fresh.src = el._url;
+  fresh.load();
+  el.querySelector(".load").classList.add("hide");
+  if (indexOf(el) === current) tryPlay(el);
+}
+
+function showError(el, msg){
+  const l = el.querySelector(".load");
+  l.classList.remove("hide"); l.classList.add("err");
+  l.querySelector(".pct").textContent = msg;
+}
+
+/* ---------------- load / release ---------------- */
+async function load(el, attempt = 0){
+  if (el._url || el._ctrl) return;                 // already loaded or in flight
+  if (!token){ showError(el, "Session expired — reload."); return; }
+
+  const ctrl = new AbortController();
+  el._ctrl = ctrl;
+  const l  = el.querySelector(".load");
+  const bar = l.querySelector(".bar i"), pct = l.querySelector(".pct");
+  l.classList.remove("hide", "err"); bar.style.width = "0";
+  pct.textContent = attempt ? `Retrying (${attempt + 1})…` : "Loading…";
+
+  try{
+    const r = await api(`https://www.googleapis.com/drive/v3/files/${el.dataset.id}?alt=media&supportsAllDrives=true`, ctrl.signal);
+    const total = +r.headers.get("content-length") || 0;
+    const reader = r.body.getReader();
+    const chunks = []; let got = 0;
+    for(;;){
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); got += value.length;
+      if (total){ const p = Math.round(got / total * 100); bar.style.width = p + "%"; pct.textContent = p + "%"; }
+      else pct.textContent = fmtSize(got);
+    }
+    if (ctrl.signal.aborted) return;
+
+    /* A stream that closes early ends the loop cleanly with partial data.
+       A truncated MP4 is an undecodable MP4, so check the byte count
+       rather than trusting that the loop finished. */
+    if (total && got < total){
+      el._ctrl = null;
+      if (attempt < 2) return load(el, attempt + 1);
+      showError(el, `Download cut short — got ${fmtSize(got)} of ${fmtSize(total)}. Tap Retry.`);
+      return;
+    }
+
+    el._bytes = chunks;
+    el._size = got;
+    el._try = 0;
+    attach(el);
+  }catch(e){
+    if (e.name === "AbortError") return;           // we cancelled it on purpose
+    el._ctrl = null;
+    if (attempt < 2 && (e.name === "TypeError" || /network|fetch/i.test(e.message || ""))){
+      return load(el, attempt + 1);                // transient connection drop
+    }
+    showError(el, e.message || "Couldn't load this one.");
+  }finally{
+    if (el._ctrl === ctrl) el._ctrl = null;
+  }
+}
+
+function release(el){
+  el._ctrl?.abort();
+  el._ctrl = null;
+
+  /* Remove the <video> outright. Chrome caps how many media elements a page
+     may hold (roughly 75 on Android); with a large library, keeping one per
+     reel pushes past that and the extras silently refuse to load. Only the
+     reels in play own an element. */
+  const v = el.querySelector("video");
+  if (v){ v.pause(); v.removeAttribute("src"); v.remove(); }
+
+  if (el._url){ URL.revokeObjectURL(el._url); el._url = null; }
+  el._bytes = null; el._try = 0; el._size = 0;
+
+  const l = el.querySelector(".load");
+  l.classList.remove("hide", "err");
+  l.querySelector(".bar i").style.width = "0";
+  l.querySelector(".pct").textContent = "Waiting…";
+  el.classList.remove("paused");
+}
+
+async function tryPlay(el, attempt = 0){
+  const v = el.querySelector("video");
+  if (!v) return;
+  if (indexOf(el) !== current) return;            // it's not on screen any more
+  try{
+    await v.play();
+    el.classList.remove("paused");
+    return;
+  }catch(e){
+    /* AbortError = something paused it mid-request; NotAllowedError = autoplay refused.
+       Both are recoverable: wait a beat, go muted, and try again. */
+    if ((e.name === "AbortError" || e.name === "NotAllowedError") && attempt < 3){
+      v.muted = true;
+      await new Promise(r => setTimeout(r, 200));
+      return tryPlay(el, attempt + 1);
+    }
+    el.classList.add("paused");
+    showError(el, `Wouldn't play: ${e.name}. ready ${v.readyState}, `
+      + `err ${v.error?.code ?? "none"}, ${fmtSize(el._size || 0)} downloaded`);
+  }
+}
+
+const indexOf = el => [...feed.children].indexOf(el);
+
+/* Keep exactly two videos alive: the current one and the next.
+   Everything else is aborted and freed, so decoders never pile up. */
+function want(){
+  const kids = [...feed.children];
+  kids.forEach((el, n) => {
+    const keep = (n === current || n === current + 1);
+    if (!keep && (el._url || el._ctrl || el._bytes)) release(el);
+    if (n !== current) el.querySelector("video")?.pause();
+  });
+  // download current first, then the next one — never in parallel
+  /* Guard each queued load: by the time it runs, the feed may have moved
+     on, and loading a released reel recreates the element churn. */
+  const near = el => { const n = indexOf(el); return n === current || n === current + 1; };
+  queue = queue.then(() => { const el = kids[current];     if (el && near(el)) return load(el); })
+               .then(() => { const el = kids[current + 1]; if (el && near(el)) return load(el); })
+               .catch(() => {});
+  const cur = kids[current];
+  if (cur?._url) tryPlay(cur);
+}
+
+function render(){
+  feed.innerHTML = "";
+  files.forEach((f, n) => feed.appendChild(reelEl(f, n)));
+  current = 0;
+  updatePos(0);
+  want();
+}
+
+function updatePos(i){ $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v10`; }
+
+/* React only once scrolling settles, so a fast swipe-through
+   doesn't kick off a download for every reel it passes. */
+let settle;
+feed.addEventListener("scroll", () => {
+  const i = Math.round(feed.scrollTop / feed.clientHeight);
+  if (i !== current){ current = i; updatePos(i); }
+  clearTimeout(settle);
+  settle = setTimeout(want, 160);   // act only once the snap has settled
+});
+
+/* ---------------- keyboard ---------------- */
+addEventListener("keydown", e => {
+  if (!feed.classList.contains("on")) return;
+  const h = feed.clientHeight;
+  if (e.key === "ArrowDown" || e.key === "PageDown"){ e.preventDefault(); feed.scrollBy({ top:h, behavior:"smooth" }); }
+  if (e.key === "ArrowUp"   || e.key === "PageUp"  ){ e.preventDefault(); feed.scrollBy({ top:-h, behavior:"smooth" }); }
+  if (e.key === " "){ e.preventDefault(); [...feed.children][current]?.click(); }
+});
+})();
+</script>
+</body>
+</html>
