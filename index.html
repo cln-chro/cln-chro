@@ -68,7 +68,7 @@
        background:linear-gradient(to bottom,rgba(0,0,0,.55),transparent);pointer-events:none}
   #top.on{display:flex}
   #top > *{pointer-events:auto}
-  #pos{font-size:12px;color:var(--muted);text-shadow:0 1px 10px #000}
+  #pos{font-size:12px;color:var(--muted);text-shadow:0 1px 10px #000;cursor:pointer;padding:4px 2px}
   .chip{margin-left:auto;padding:7px 13px;border-radius:999px;background:rgba(18,18,20,.6);backdrop-filter:blur(8px);font-size:13px;font-weight:500}
 
   /* like button — one fixed control, just under the top-bar chips */
@@ -84,10 +84,14 @@
   /* top-ten trophy */
   #rank{position:fixed;right:14px;top:calc(env(safe-area-inset-top) + 108px);z-index:6;
         height:32px;padding:0 10px 0 8px;border-radius:999px;display:none;align-items:center;gap:5px;
-        background:rgba(240,180,41,.18);border:1px solid rgba(240,180,41,.5);backdrop-filter:blur(8px)}
+        backdrop-filter:blur(8px);--m:#9aa0ad;
+        background:rgba(154,160,173,.18);border:1px solid rgba(154,160,173,.5)}
   #rank.on{display:flex}
-  #rank svg{width:15px;height:15px;fill:none;stroke:var(--lamp);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-  #rank b{font-size:13px;font-weight:700;color:var(--lamp);letter-spacing:.01em}
+  #rank.r1{--m:#f0b429;background:rgba(240,180,41,.18);border-color:rgba(240,180,41,.55)}   /* gold   */
+  #rank.r2{--m:#ccd2dc;background:rgba(204,210,220,.18);border-color:rgba(204,210,220,.55)} /* silver */
+  #rank.r3{--m:#cd8440;background:rgba(205,132,64,.20);border-color:rgba(205,132,64,.6)}    /* bronze */
+  #rank svg{width:15px;height:15px;fill:none;stroke:var(--m);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  #rank b{font-size:13px;font-weight:700;color:var(--m);letter-spacing:.01em}
 
   #likeCnt{position:absolute;bottom:-2px;right:-2px;min-width:18px;height:18px;padding:0 5px;
            border-radius:9px;background:var(--like);color:#fff;font-size:11px;font-weight:700;
@@ -137,8 +141,7 @@
 
 <div id="top">
   <div id="pos"></div>
-  <button class="chip" id="openBoard">Tally</button>
-  <button class="chip" id="reshuffle" style="margin-left:8px">Reshuffle</button>
+  <button class="chip" id="reshuffle">Reshuffle</button>
 </div>
 
 <button id="like" aria-label="Like"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.6-7-9.3A4 4 0 0 1 12 8a4 4 0 0 1 7-2.7c0 4.7-7 14.7-7 14.7z"/></svg><span id="likeCnt"></span></button>
@@ -372,6 +375,7 @@ function reelEl(f, n){
   el.className = "reel";
   el.dataset.id = f.id;
   el.dataset.mime = f.mimeType || "video/mp4";
+  el.dataset.size = f.size || "";
   el.innerHTML = `
     <div class="load">
       <div>
@@ -446,8 +450,20 @@ function makeVideo(){
       attach(el);
       return;
     }
+    /* Relabelling can't rescue bad bytes, so fetch the file again from
+       scratch once before calling it a failure. */
+    if (code === 4 && !el._redl){
+      el._redl = 1;
+      const expect = +el.dataset.size || 0;
+      const got = el._size || 0;
+      release(el);
+      el._redl = 1;                                // release() clears flags
+      load(el);
+      if (expect && got < expect) toast("Re-downloading — the first copy came up short");
+      return;
+    }
     showError(el, code === 4
-      ? `Chrome can't decode this (${fmtSize(el._size || 0)} downloaded). Tap Retry.`
+      ? `Can't decode: ${fmtSize(el._size || 0)} of ${fmtSize(+el.dataset.size || 0)}. Tap Retry.`
       : "Playback failed (media error " + (code ?? "?") + ") — tap Retry.");
   });
 
@@ -520,7 +536,11 @@ function paintLike(){
 
   const place = rankOf(f.id);
   r.classList.toggle("on", place > 0);
-  if (place) r.querySelector("b").textContent = place;
+  r.classList.remove("r1", "r2", "r3");
+  if (place){
+    r.querySelector("b").textContent = place;
+    if (place <= 3) r.classList.add("r" + place);   // gold, silver, bronze
+  }
 }
 
 function bumpLike(by){
@@ -590,7 +610,8 @@ function openBoard(){
   $("#board").classList.add("show");
 }
 function closeBoard(){ $("#board").classList.remove("show"); }
-$("#openBoard").onclick = openBoard;
+$("#rank").onclick = openBoard;
+$("#pos").onclick = openBoard;        // the counter doubles as the way in
 $("#closeBoard").onclick = closeBoard;
 $("#board").addEventListener("click", e => { if (e.target.id === "board") closeBoard(); });
 
@@ -626,13 +647,14 @@ async function load(el, attempt = 0){
     }
     if (ctrl.signal.aborted) return;
 
-    /* A stream that closes early ends the loop cleanly with partial data.
-       A truncated MP4 is an undecodable MP4, so check the byte count
-       rather than trusting that the loop finished. */
-    if (total && got < total){
+    /* A stream that closes early ends the loop cleanly with partial data, and
+       a truncated MP4 is an undecodable MP4. Drive doesn't always send
+       content-length, so trust the size from the file listing first. */
+    const want_ = +el.dataset.size || total;
+    if (want_ && got < want_){
       el._ctrl = null;
-      if (attempt < 2) return load(el, attempt + 1);
-      showError(el, `Download cut short — got ${fmtSize(got)} of ${fmtSize(total)}. Tap Retry.`);
+      if (attempt < 3) return load(el, attempt + 1);
+      showError(el, `Download cut short — got ${fmtSize(got)} of ${fmtSize(want_)}. Tap Retry.`);
       return;
     }
 
@@ -664,7 +686,7 @@ function release(el){
   if (v) parkVideo(v);
 
   if (el._url){ URL.revokeObjectURL(el._url); el._url = null; }
-  el._bytes = null; el._try = 0; el._size = 0;
+  el._bytes = null; el._try = 0; el._size = 0; el._redl = 0;
 
   const l = el.querySelector(".load");
   l.classList.remove("hide", "err");
@@ -726,7 +748,7 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v14`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v15`;
   paintLike();
 }
 
