@@ -8,7 +8,7 @@
 <style>
   :root{
     --stage:#000; --panel:#141416; --panel-2:#1d1d21; --line:#31313a;
-    --ink:#f4f2ee; --muted:#95949e; --lamp:#f0b429; --danger:#e06a5c;
+    --ink:#f4f2ee; --muted:#95949e; --lamp:#f0b429; --danger:#e06a5c; --like:#ff3b5c;
     --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -42,9 +42,13 @@
   .load .retry{margin-top:12px;padding:8px 16px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);font-size:13px;display:none}
   .load.err .retry{display:inline-block}
 
-  .meta{position:absolute;left:16px;right:88px;bottom:calc(26px + env(safe-area-inset-bottom));pointer-events:none}
+  .meta{position:absolute;left:16px;right:88px;bottom:calc(12px + env(safe-area-inset-bottom));pointer-events:none}
   .meta .name{font-size:15px;line-height:1.35;font-weight:500;letter-spacing:-.01em;text-shadow:0 1px 12px rgba(0,0,0,.85);word-break:break-word}
-  .meta .sub{margin-top:4px;font-size:12px;color:var(--muted);text-shadow:0 1px 10px rgba(0,0,0,.85)}
+  .starmark{position:absolute;left:16px;top:calc(env(safe-area-inset-top) + 54px);
+            padding:4px 9px;border-radius:999px;background:rgba(240,180,41,.16);
+            border:1px solid rgba(240,180,41,.45);color:var(--lamp);
+            font-size:11px;font-weight:600;letter-spacing:.02em}
+  .starmark[hidden]{display:none}
 
   .side{position:absolute;right:12px;bottom:calc(26px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:6px}
   .side button{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:rgba(18,18,20,.55);backdrop-filter:blur(8px)}
@@ -67,6 +71,52 @@
   #pos{font-size:12px;color:var(--muted);text-shadow:0 1px 10px #000}
   .chip{margin-left:auto;padding:7px 13px;border-radius:999px;background:rgba(18,18,20,.6);backdrop-filter:blur(8px);font-size:13px;font-weight:500}
 
+  /* like button — one fixed control, just under the top-bar chips */
+  #like{position:fixed;right:14px;top:calc(env(safe-area-inset-top) + 58px);z-index:6;
+        width:42px;height:42px;border-radius:50%;display:none;place-items:center;
+        background:rgba(18,18,20,.55);backdrop-filter:blur(8px)}
+  #like.on{display:grid}
+  #like:active{transform:scale(.92)}
+  #like svg{width:20px;height:20px;fill:none;stroke:var(--ink);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  #like.has svg{fill:var(--like);stroke:var(--like)}
+  #like.pop{animation:pop .3s ease}
+  @keyframes pop{0%{transform:scale(1)}45%{transform:scale(1.22)}100%{transform:scale(1)}}
+  /* top-ten trophy */
+  #rank{position:fixed;right:14px;top:calc(env(safe-area-inset-top) + 108px);z-index:6;
+        height:32px;padding:0 10px 0 8px;border-radius:999px;display:none;align-items:center;gap:5px;
+        background:rgba(240,180,41,.18);border:1px solid rgba(240,180,41,.5);backdrop-filter:blur(8px)}
+  #rank.on{display:flex}
+  #rank svg{width:15px;height:15px;fill:none;stroke:var(--lamp);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  #rank b{font-size:13px;font-weight:700;color:var(--lamp);letter-spacing:.01em}
+
+  #likeCnt{position:absolute;bottom:-2px;right:-2px;min-width:18px;height:18px;padding:0 5px;
+           border-radius:9px;background:var(--like);color:#fff;font-size:11px;font-weight:700;
+           line-height:18px;text-align:center;display:none}
+  #like.has #likeCnt{display:block}
+
+  /* leaderboard */
+  #board{position:fixed;inset:0;z-index:25;display:none;background:rgba(0,0,0,.72)}
+  #board.show{display:block}
+  #boardPanel{position:absolute;left:0;right:0;bottom:0;max-height:82dvh;display:flex;flex-direction:column;
+              background:var(--panel);border-radius:18px 18px 0 0;border-top:1px solid var(--line);
+              padding-bottom:env(safe-area-inset-bottom)}
+  #boardPanel h2{font-size:16px;font-weight:600;letter-spacing:-.01em}
+  .boardHead{display:flex;align-items:center;gap:12px;padding:16px 16px 12px;border-bottom:1px solid var(--line)}
+  .boardHead .close{margin-left:auto;font-size:14px;color:var(--muted)}
+  #rows{overflow-y:auto;padding:8px 0 14px}
+  .brow{display:flex;align-items:center;gap:11px;padding:8px 16px}
+  .brow .rank{width:22px;text-align:center;font-size:14px;font-weight:600;color:var(--muted);flex:none}
+  .brow:nth-child(1) .rank{color:#f0b429}
+  .brow:nth-child(2) .rank{color:#c3c7cf}
+  .brow:nth-child(3) .rank{color:#c98a52}
+  .brow .av{width:38px;height:38px;border-radius:50%;flex:none}
+  .brow .barwrap{flex:1;height:22px;background:var(--panel-2);border-radius:6px;overflow:hidden;min-width:0}
+  .brow .bar{height:100%;border-radius:6px;min-width:5px}
+  .brow .n{width:38px;text-align:right;font-size:15px;font-weight:700;flex:none}
+  .brow .clr{width:30px;height:30px;border-radius:8px;background:var(--panel-2);color:var(--muted);
+             font-size:17px;line-height:1;flex:none}
+  #boardEmpty{padding:26px 16px;text-align:center;color:var(--muted);font-size:13px;line-height:1.6}
+
   #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(12px);z-index:40;
          background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:9px 16px;font-size:13px;
          opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;white-space:nowrap;max-width:86vw;overflow:hidden;text-overflow:ellipsis}
@@ -87,7 +137,23 @@
 
 <div id="top">
   <div id="pos"></div>
-  <button class="chip" id="reshuffle">Reshuffle</button>
+  <button class="chip" id="openBoard">Tally</button>
+  <button class="chip" id="reshuffle" style="margin-left:8px">Reshuffle</button>
+</div>
+
+<button id="like" aria-label="Like"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.6-7-9.3A4 4 0 0 1 12 8a4 4 0 0 1 7-2.7c0 4.7-7 14.7-7 14.7z"/></svg><span id="likeCnt"></span></button>
+
+<div id="rank" aria-label="Ranking"><svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 5H5v2a3 3 0 0 0 3 3"/><path d="M16 5h3v2a3 3 0 0 1-3 3"/><path d="M12 13v4"/><path d="M9 20h6"/><path d="M10 17h4l1 3H9z"/></svg><b></b></div>
+
+<div id="board" role="dialog" aria-modal="true" aria-label="Tally">
+  <div id="boardPanel">
+    <div class="boardHead">
+      <h2>Tally</h2>
+      <button class="close" id="closeBoard">Done</button>
+    </div>
+    <div id="rows"></div>
+    <div id="boardEmpty">No likes yet. Tap the heart on a video to start counting.</div>
+  </div>
 </div>
 
 <div id="feed" aria-label="Video feed"></div>
@@ -105,18 +171,23 @@ const CLIENT_ID = "912858917708-82lcot5nfb21r8lncfik2q0mvg6heovu.apps.googleuser
 const FOLDER_ID = "1XUdO_a3nphazi95miRNlcJvWIu0wyUSH";   // Drive folder ID
 /* ============================================================ */
 
-const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+            + " https://www.googleapis.com/auth/drive.file";
+const TALLY_FILE = "reel-tallies.json";
 const $ = s => document.querySelector(s);
 const feed = $("#feed"), gate = $("#gate");
 let token = null, files = [], muted = true, tokenClient = null;
 let current = 0;                 // index of the reel on screen
+let counts = {};                 // {fileId: likes} — display only, never affects order
+let tallyId = null;              // Drive id of the tally file, once known
 let queue = Promise.resolve();   // serialises downloads: one at a time
 
 const ICON = {
   sound:'<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
   mute :'<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="m16 9 5 6M21 9l-5 6"/></svg>',
   next :'<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m6 13 6 6 6-6"/></svg>',
-  play :'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
+  play :'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
+  heart:'<svg viewBox="0 0 24 24"><path d="M12 20s-7-4.6-7-9.3A4 4 0 0 1 12 8a4 4 0 0 1 7-2.7c0 4.7-7 14.7-7 14.7z"/></svg>'
 };
 const fmtSize = b => !b ? "" : b >= 1073741824 ? (b/1073741824).toFixed(1)+" GB"
                   : b >= 1048576 ? Math.round(b/1048576)+" MB" : Math.round(b/1024)+" KB";
@@ -150,6 +221,92 @@ async function api(url, signal){
   return r;
 }
 
+/* ---------------- tallies ----------------
+   Counts live in a JSON file in Drive, not in the browser, so they survive
+   an incognito window closing. The drive.file scope reaches only files this
+   app created, so it can keep this file and nothing else. */
+async function authFetch(url, opts = {}){
+  const r = await fetch(url, { ...opts, headers: { Authorization: "Bearer " + token, ...(opts.headers || {}) } });
+  if (!r.ok) throw new Error("Drive returned " + r.status);
+  return r;
+}
+
+async function loadTallies(){
+  try{
+    const q = encodeURIComponent(`name='${TALLY_FILE}' and trashed = false`);
+    const d = await (await authFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&pageSize=1`)).json();
+    if (d.files && d.files.length){
+      tallyId = d.files[0].id;
+      const txt = await (await authFetch(`https://www.googleapis.com/drive/v3/files/${tallyId}?alt=media`)).text();
+      const parsed = JSON.parse(txt);
+      if (parsed && typeof parsed === "object") counts = parsed;
+    }
+  }catch(e){
+    counts = {};                      // start fresh rather than blocking the feed
+  }
+}
+
+let saveTimer = null, saving = false, saveAgain = false;
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveTallies, 2500);   // batch a burst of taps into one write
+}
+async function saveTallies(){
+  if (saving){ saveAgain = true; return; }
+  saving = true;
+  const body = JSON.stringify(counts);
+  try{
+    if (!tallyId){
+      const meta = { name: TALLY_FILE, mimeType: "application/json" };
+      const boundary = "rv" + Date.now();
+      const payload =
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
+        `--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
+      const d = await (await authFetch(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+        { method: "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body: payload }
+      )).json();
+      tallyId = d.id;
+    } else {
+      await authFetch(`https://www.googleapis.com/upload/drive/v3/files/${tallyId}?uploadType=media`,
+        { method: "PATCH", headers: { "Content-Type": "application/json" }, body });
+    }
+  }catch(e){
+    toast("Couldn't save likes — they'll retry");
+    saveAgain = true;
+  }finally{
+    saving = false;
+    if (saveAgain){ saveAgain = false; scheduleSave(); }
+  }
+}
+
+/* A stable colour and glyph per video, worked out from its Drive id, so the
+   tally shows recognisable marks without naming anything. */
+function hashOf(str){
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+const GLYPH = [
+  '<circle cx="19" cy="19" r="8"/>',
+  '<rect x="11" y="11" width="16" height="16" rx="3"/>',
+  '<path d="M19 10 28 27H10z"/>',
+  '<path d="M19 9 29 19 19 29 9 19z"/>',
+  '<circle cx="19" cy="19" r="9" fill="none" stroke="#fff" stroke-width="4"/>',
+  '<rect x="9" y="15" width="20" height="8" rx="4"/>',
+  '<path d="M16 9h6v7h7v6h-7v7h-6v-7H9v-6h7z"/>',
+  '<circle cx="14" cy="14" r="4.5"/><circle cx="24" cy="24" r="4.5"/><circle cx="24" cy="14" r="4.5"/>'
+];
+function avatar(id){
+  const h = hashOf(id);
+  const hue = h % 360;
+  const g = GLYPH[(h >> 9) % GLYPH.length];
+  return `<svg class="av" viewBox="0 0 38 38" aria-hidden="true">`
+       + `<circle cx="19" cy="19" r="19" fill="hsl(${hue} 62% 46%)"/>`
+       + `<g fill="#fff" opacity=".92">${g}</g></svg>`;
+}
+function hueOf(id){ return hashOf(id) % 360; }
+
 /* ---------------- file list ---------------- */
 async function loadFiles(){
   $("#signin").textContent = "Reading folder…";
@@ -160,7 +317,7 @@ async function loadFiles(){
     files = []; let pageToken = "";
     do{
       const url = `https://www.googleapis.com/drive/v3/files?q=${q}`
-                + `&fields=nextPageToken,files(id,name,size,mimeType)&pageSize=200&orderBy=name`
+                + `&fields=nextPageToken,files(id,name,size,mimeType,starred)&pageSize=200&orderBy=name`
                 + `&supportsAllDrives=true&includeItemsFromAllDrives=true`
                 + (pageToken ? `&pageToken=${pageToken}` : "");
       const data = await (await api(url)).json();
@@ -169,19 +326,39 @@ async function loadFiles(){
     } while (pageToken && files.length < 2000);
 
     if (!files.length) return fail(FOLDER_ID ? "No videos in that folder — check the folder ID." : "No videos found in this account.");
+    $("#signin").textContent = "Reading tallies…";
+    await loadTallies();
+    const nStar = files.filter(f => f.starred).length;
     shuffle();
     gate.style.display = "none";
     feed.classList.add("on");
     $("#top").classList.add("on");
     render();
+    setTimeout(() => toast(
+      nStar ? `${files.length} videos · ${nStar} starred` 
+            : `${files.length} videos · none starred yet`), 600);
   }catch(e){ fail(e.message); }
 }
 
 function shuffle(){
-  for (let i = files.length - 1; i > 0; i--){
-    const j = Math.floor(Math.random() * (i + 1));
-    [files[i], files[j]] = [files[j], files[i]];
+  /* Starred videos are held back, then paced in: ten plain ones first, the
+     first starred at position 11, then every third from there (14, 17, 20…).
+     Like counts play no part in this — ordering is starred-only. */
+  const pick = a => a.splice(Math.floor(Math.random() * a.length), 1)[0];
+  const star  = files.filter(f => f.starred);
+  const plain = files.filter(f => !f.starred);
+  const out = [];
+  let untilStar = 10;                 // ten plain, so #11 is the first starred
+
+  while (star.length || plain.length){
+    if (untilStar > 0 && plain.length){ out.push(pick(plain)); untilStar--; }
+    else if (star.length){
+      out.push(pick(star));
+      untilStar = plain.length ? 2 : 0;   // two plain between starred = every 3rd
+    }
+    else out.push(pick(plain));
   }
+  files = out;
 }
 
 $("#reshuffle").onclick = () => {
@@ -204,7 +381,8 @@ function reelEl(f, n){
       </div>
     </div>
     <div class="shade"></div>
-    <div class="meta"><div class="name"></div><div class="sub"></div></div>
+    <div class="meta"><div class="name"></div></div>
+    <div class="starmark" hidden>★ starred</div>
     <div class="side">
       <button class="snd" aria-label="Sound">${muted ? ICON.mute : ICON.sound}</button>
       <button class="nxt" aria-label="Next">${ICON.next}</button>
@@ -213,7 +391,7 @@ function reelEl(f, n){
     <div class="scrub"><div class="track"><div class="fill"></div></div></div>`;
 
   el.querySelector(".name").textContent = f.name.replace(/\.[^.]+$/, "");
-  el.querySelector(".sub").textContent = [fmtSize(+f.size), `${n + 1} of ${files.length}`].filter(Boolean).join(" · ");
+  if (f.starred) el.querySelector(".starmark").hidden = false;
 
   el.addEventListener("click", ev => {
     if (ev.target.closest("button") || ev.target.closest(".scrub")) return;
@@ -244,10 +422,24 @@ function reelEl(f, n){
   return el;
 }
 
-function wireVideo(el, v){
-  v.muted = muted;
+/* Android hands out a small, device-wide pool of hardware decoders and
+   reclaims them asynchronously. Minting a new <video> for every reel burns
+   through that pool faster than it refills, and the next element comes back
+   undecodable (error 4, readyState 0) no matter how good the file is. So we
+   keep a couple of elements for the whole session and just swap the source. */
+const pool = [];
+
+function makeVideo(){
+  const v = document.createElement("video");
+  v.playsInline = true; v.loop = true; v.muted = muted; v.preload = "auto";
+  v.setAttribute("playsinline", ""); v.setAttribute("webkit-playsinline", "");
+
+  /* Listeners are bound once per element and find their reel at call time,
+     since the element moves between reels. */
   v.addEventListener("error", () => {
-    if (!v.src) return;                            // blank element, not a real failure
+    if (!v.getAttribute("src")) return;            // parked element, not a failure
+    const el = v.closest(".reel");
+    if (!el) return;
     const code = v.error?.code;
     if (code === 4 && el._bytes && el._try < labels(el).length - 1){
       el._try++;                                   // same bytes, different label
@@ -258,10 +450,28 @@ function wireVideo(el, v){
       ? `Chrome can't decode this (${fmtSize(el._size || 0)} downloaded). Tap Retry.`
       : "Playback failed (media error " + (code ?? "?") + ") — tap Retry.");
   });
+
   v.addEventListener("timeupdate", () => {
-    const fill = el.querySelector(".fill");
-    if (v.duration) fill.style.width = (v.currentTime / v.duration * 100) + "%";
+    const el = v.closest(".reel");
+    const fill = el?.querySelector(".fill");
+    if (fill && v.duration) fill.style.width = (v.currentTime / v.duration * 100) + "%";
   });
+
+  return v;
+}
+
+function takeVideo(){
+  const v = pool.pop() || makeVideo();
+  v.muted = muted;
+  return v;
+}
+
+function parkVideo(v){
+  v.pause();
+  v.removeAttribute("src");
+  v.load();                                        // drops the decoder, keeps the element
+  v.remove();
+  if (pool.length < 3) pool.push(v);
 }
 
 /* Chrome rejects a blob labelled video/quicktime even when the bytes inside
@@ -277,19 +487,112 @@ function labels(el){
 
 function attach(el){
   const type = labels(el)[el._try];
-  const fresh = document.createElement("video");
-  fresh.playsInline = true; fresh.loop = true; fresh.muted = muted;
-  fresh.setAttribute("playsinline", ""); fresh.setAttribute("webkit-playsinline", "");
-  el.querySelector("video")?.remove();
-  el.insertBefore(fresh, el.firstChild);
-  wireVideo(el, fresh);
+  let v = el.querySelector("video");
+  if (!v){ v = takeVideo(); el.insertBefore(v, el.firstChild); }
   if (el._url) URL.revokeObjectURL(el._url);
   el._url = URL.createObjectURL(type ? new Blob(el._bytes, { type }) : new Blob(el._bytes));
-  fresh.src = el._url;
-  fresh.load();
+  v.src = el._url;
+  v.muted = muted;
+  v.load();
   el.querySelector(".load").classList.add("hide");
   if (indexOf(el) === current) tryPlay(el);
 }
+
+/* One fixed heart that always refers to whatever reel is on screen, so it
+   never gets torn down with a reel and can't disappear mid-scroll. */
+/* Where this video sits among the ten most-liked, or 0 if it isn't in them.
+   Ties go to whoever was reached first, which is good enough for a badge. */
+function rankOf(id){
+  const n = counts[id] || 0;
+  if (!n) return 0;
+  const better = Object.keys(counts).filter(k => (counts[k] || 0) > n).length;
+  return better < 10 ? better + 1 : 0;
+}
+
+function paintLike(){
+  const f = files[current];
+  const b = $("#like"), r = $("#rank");
+  if (!f){ b.classList.remove("on"); r.classList.remove("on"); return; }
+  const n = counts[f.id] || 0;
+  b.classList.add("on");
+  b.classList.toggle("has", n > 0);
+  $("#likeCnt").textContent = n > 99 ? "99+" : n;
+
+  const place = rankOf(f.id);
+  r.classList.toggle("on", place > 0);
+  if (place) r.querySelector("b").textContent = place;
+}
+
+function bumpLike(by){
+  const f = files[current];
+  if (!f) return;
+  const n = (counts[f.id] || 0) + by;
+  if (n > 0) counts[f.id] = n; else delete counts[f.id];
+  paintLike();
+  const b = $("#like");
+  b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop");
+  scheduleSave();
+}
+
+/* Tap adds one; press and hold takes one back. */
+(() => {
+  const b = $("#like");
+  let held = false, timer = null;
+  const start = () => { held = false; timer = setTimeout(() => { held = true; bumpLike(-1); toast("Removed a like"); }, 550); };
+  const end = ev => {
+    clearTimeout(timer);
+    /* Always cancel the default so a touch doesn't also fire synthetic mouse
+       events, which would re-add the like a long press just removed. */
+    if (ev.cancelable) ev.preventDefault();
+    if (!held) bumpLike(1);
+    held = false;
+  };
+  b.addEventListener("touchstart", start, { passive: true });
+  b.addEventListener("touchend", end);
+  b.addEventListener("mousedown", start);
+  b.addEventListener("mouseup", end);
+  b.addEventListener("contextmenu", e => e.preventDefault());
+})();
+
+/* ---------------- tally board ---------------- */
+function openBoard(){
+  const rows = $("#rows");
+  const ranked = files
+    .map(f => ({ f, n: counts[f.id] || 0 }))
+    .filter(x => x.n > 0)
+    .sort((a, b) => b.n - a.n);
+
+  $("#boardEmpty").style.display = ranked.length ? "none" : "block";
+  rows.innerHTML = "";
+  const top = ranked[0]?.n || 1;
+
+  ranked.forEach((x, i) => {
+    const row = document.createElement("div");
+    row.className = "brow";
+    row.innerHTML = `<div class="rank">${i + 1}</div>${avatar(x.f.id)}`
+      + `<div class="barwrap"><div class="bar"></div></div><div class="n"></div>`
+      + `<button class="clr" aria-label="Clear">&minus;</button>`;
+    const bar = row.querySelector(".bar");
+    bar.style.width = Math.max(4, Math.round(x.n / top * 100)) + "%";
+    bar.style.background = `hsl(${hueOf(x.f.id)} 62% 50%)`;
+    row.querySelector(".n").textContent = x.n;
+    row.querySelector(".clr").onclick = ev => {
+      ev.stopPropagation();
+      delete counts[x.f.id];
+      scheduleSave(); paintLike(); openBoard();   // redraw the board
+    };
+    row.onclick = () => {                       // jump to that video
+      const at = files.indexOf(x.f);
+      if (at >= 0){ closeBoard(); feed.scrollTo({ top: at * feed.clientHeight }); }
+    };
+    rows.appendChild(row);
+  });
+  $("#board").classList.add("show");
+}
+function closeBoard(){ $("#board").classList.remove("show"); }
+$("#openBoard").onclick = openBoard;
+$("#closeBoard").onclick = closeBoard;
+$("#board").addEventListener("click", e => { if (e.target.id === "board") closeBoard(); });
 
 function showError(el, msg){
   const l = el.querySelector(".load");
@@ -358,7 +661,7 @@ function release(el){
      reel pushes past that and the extras silently refuse to load. Only the
      reels in play own an element. */
   const v = el.querySelector("video");
-  if (v){ v.pause(); v.removeAttribute("src"); v.remove(); }
+  if (v) parkVideo(v);
 
   if (el._url){ URL.revokeObjectURL(el._url); el._url = null; }
   el._bytes = null; el._try = 0; el._size = 0;
@@ -422,7 +725,10 @@ function render(){
   want();
 }
 
-function updatePos(i){ $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v10`; }
+function updatePos(i){
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v14`;
+  paintLike();
+}
 
 /* React only once scrolling settles, so a fast swipe-through
    doesn't kick off a download for every reel it passes. */
