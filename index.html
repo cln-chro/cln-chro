@@ -69,47 +69,39 @@
   #pos{font-size:12px;color:var(--muted);text-shadow:0 1px 10px #000;cursor:pointer;padding:4px 2px}
   .chip{margin-left:auto;padding:7px 13px;border-radius:999px;background:rgba(18,18,20,.6);backdrop-filter:blur(8px);font-size:13px;font-weight:500}
 
-  /* like button — one fixed control, just under the top-bar chips */
-  #like{position:fixed;right:14px;top:calc(env(safe-area-inset-top) + 58px);z-index:6;
-        width:42px;height:42px;border-radius:50%;display:none;place-items:center;
-        background:rgba(18,18,20,.55);backdrop-filter:blur(8px)}
+  /* Bare marks on the video — no pills. Shapes sit at 35% so they read as
+     information rather than chrome; the number inside keeps a dark outline so
+     it stays legible over bright footage. */
+  .mark{overflow:visible;filter:drop-shadow(0 1px 3px rgba(0,0,0,.7))}
+  .mark .f{fill:var(--m);fill-opacity:.35;stroke:var(--m);stroke-opacity:.35;stroke-width:2;stroke-linejoin:round}
+  .mark .s{fill:none;stroke:var(--m);stroke-opacity:.35;stroke-width:2.3;stroke-linecap:round}
+  .mark .s2{fill:none;stroke:var(--m);stroke-opacity:.35;stroke-width:3.2;stroke-linecap:round}
+  .mark text{font:800 13px var(--sans);fill:#fff;text-anchor:middle;
+             paint-order:stroke;stroke:rgba(0,0,0,.5);stroke-width:2.5px}
+
+  /* like button — the one thing you tap */
+  #like{position:fixed;right:10px;top:calc(env(safe-area-inset-top) + 56px);z-index:6;
+        width:52px;height:52px;display:none;place-items:center;--m:#ff3b5c}
   #like.on{display:grid}
   #like:active{transform:scale(.92)}
-  #like svg{width:20px;height:20px;fill:none;stroke:var(--ink);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-  #like.has svg{fill:var(--like);stroke:var(--like)}
+  #like svg{width:44px;height:44px}
   #like.pop{animation:pop .3s ease}
   @keyframes pop{0%{transform:scale(1)}45%{transform:scale(1.22)}100%{transform:scale(1)}}
-  /* top-ten trophy */
-  #rank{position:fixed;right:14px;top:calc(env(safe-area-inset-top) + 108px);z-index:6;
-        height:32px;padding:0 10px 0 8px;border-radius:999px;display:none;align-items:center;gap:5px;
-        backdrop-filter:blur(8px);--m:#9aa0ad;
-        background:rgba(154,160,173,.18);border:1px solid rgba(154,160,173,.5)}
-  #rank.on{display:flex}
-  #rank.r1{--m:#f0b429;background:rgba(240,180,41,.18);border-color:rgba(240,180,41,.55)}   /* gold   */
-  #rank.r2{--m:#ccd2dc;background:rgba(204,210,220,.18);border-color:rgba(204,210,220,.55)} /* silver */
-  #rank.r3{--m:#cd8440;background:rgba(205,132,64,.20);border-color:rgba(205,132,64,.6)}    /* bronze */
-  #rank svg{width:15px;height:15px;fill:none;stroke:var(--m);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-  #rank b{font-size:13px;font-weight:700;color:var(--m);letter-spacing:.01em}
 
-  /* category trophy — same medals, a touch smaller so the two read apart */
-  #crank{position:fixed;left:14px;top:calc(env(safe-area-inset-top) + 42px);z-index:6;
-         height:27px;padding:0 9px 0 7px;border-radius:999px;display:none;align-items:center;gap:4px;
-         backdrop-filter:blur(8px);--m:#9aa0ad;
-         background:rgba(154,160,173,.14);border:1px solid rgba(154,160,173,.42)}
+  /* video rank — ribbon */
+  #rank{position:fixed;right:12px;top:calc(env(safe-area-inset-top) + 112px);z-index:6;
+        display:none;--m:#9aa0ad}
+  #rank.on{display:block}
+  #rank.r1{--m:#f0b429} #rank.r2{--m:#ccd2dc} #rank.r3{--m:#cd8440}
+  #rank svg{width:46px;height:50px}
+
+  /* category — trophy (rank) beside a heart (its total likes) */
+  #crank{position:fixed;left:12px;top:calc(env(safe-area-inset-top) + 40px);z-index:6;
+         display:none;align-items:center;gap:4px}
   #crank.on{display:flex}
-  #crank.r1{--m:#f0b429;background:rgba(240,180,41,.15);border-color:rgba(240,180,41,.5)}
-  #crank.r2{--m:#ccd2dc;background:rgba(204,210,220,.15);border-color:rgba(204,210,220,.5)}
-  #crank.r3{--m:#cd8440;background:rgba(205,132,64,.17);border-color:rgba(205,132,64,.55)}
-  #crank svg{width:13px;height:13px;fill:none;stroke:var(--m);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-  #crank b{font-size:12px;font-weight:700;color:var(--m)}
-  #crank .sep{width:1px;height:14px;background:currentColor;opacity:.28;margin:0 2px}
-  #crank svg.h{width:12px;height:12px;fill:var(--like);stroke:var(--like);stroke-width:1.4}
-  #crank i{font-size:12px;font-weight:700;font-style:normal;color:var(--ink)}
-
-  #likeCnt{position:absolute;bottom:-2px;right:-2px;min-width:18px;height:18px;padding:0 5px;
-           border-radius:9px;background:var(--like);color:#fff;font-size:11px;font-weight:700;
-           line-height:18px;text-align:center;display:none}
-  #like.has #likeCnt{display:block}
+  #crank .tr{--m:#9aa0ad;width:46px;height:50px}
+  #crank.r1 .tr{--m:#f0b429} #crank.r2 .tr{--m:#ccd2dc} #crank.r3 .tr{--m:#cd8440}
+  #crank .hs{--m:#ff3b5c;width:42px;height:42px}
 
   /* leaderboard */
   #board{position:fixed;inset:0;z-index:25;display:none;background:rgba(0,0,0,.72)}
@@ -120,6 +112,10 @@
   #boardPanel h2{font-size:16px;font-weight:600;letter-spacing:-.01em}
   .boardHead{display:flex;align-items:center;gap:12px;padding:16px 16px 12px;border-bottom:1px solid var(--line)}
   .boardHead .close{margin-left:auto;font-size:14px;color:var(--muted)}
+  .tabs{display:flex;gap:6px;padding:10px 16px;border-bottom:1px solid var(--line)}
+  .tab{flex:1;padding:8px;border-radius:9px;background:var(--panel-2);color:var(--muted);
+       font-size:13px;font-weight:600;text-align:center}
+  .tab.on{background:var(--lamp);color:#15120a}
   #rows{overflow-y:auto;padding:8px 0 14px}
   .brow{display:flex;align-items:center;gap:11px;padding:8px 16px}
   .brow .rank{width:22px;text-align:center;font-size:14px;font-weight:600;color:var(--muted);flex:none}
@@ -134,10 +130,6 @@
   .brow .n{width:38px;text-align:right;font-size:15px;font-weight:700;flex:none}
   .brow .clr{width:30px;height:30px;border-radius:8px;background:var(--panel-2);color:var(--muted);
              font-size:17px;line-height:1;flex:none}
-  .tabs{display:flex;gap:6px;padding:10px 16px;border-bottom:1px solid var(--line)}
-  .tab{flex:1;padding:8px;border-radius:9px;background:var(--panel-2);color:var(--muted);
-       font-size:13px;font-weight:600;text-align:center}
-  .tab.on{background:var(--lamp);color:#15120a}
   #boardEmpty{padding:26px 16px;text-align:center;color:var(--muted);font-size:13px;line-height:1.6}
 
   #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(12px);z-index:40;
@@ -163,11 +155,11 @@
   <button class="chip" id="reshuffle">Reshuffle</button>
 </div>
 
-<button id="like" aria-label="Like"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.6-7-9.3A4 4 0 0 1 12 8a4 4 0 0 1 7-2.7c0 4.7-7 14.7-7 14.7z"/></svg><span id="likeCnt"></span></button>
+<button id="like" aria-label="Like"><svg class="mark" viewBox="0 0 40 40"><path class="f" d="M20 35S4 24.5 4 14.2A8.6 8.6 0 0 1 20 9.6a8.6 8.6 0 0 1 16-4.6c0 10.3-16 30-16 30z"/><text x="20" y="23" id="likeNum"></text></svg></button>
 
-<div id="rank" aria-label="Ranking"><svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 5H5v2a3 3 0 0 0 3 3"/><path d="M16 5h3v2a3 3 0 0 1-3 3"/><path d="M12 13v4"/><path d="M9 20h6"/><path d="M10 17h4l1 3H9z"/></svg><b></b></div>
+<div id="rank" aria-label="Video ranking"><svg class="mark" viewBox="0 0 40 44"><path class="f" d="M13.5 23 9.5 41l10.5-5.5L30.5 41l-4-18z"/><circle class="f" cx="20" cy="15" r="11.5"/><text x="20" y="19.5"></text></svg></div>
 
-<div id="crank" aria-label="Category ranking"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="5.5"/><path d="M8.5 12.5 6 22l6-3 6 3-2.5-9.5"/></svg><b></b><span class="sep"></span><svg class="h" viewBox="0 0 24 24"><path d="M12 20s-7-4.6-7-9.3A4 4 0 0 1 12 8a4 4 0 0 1 7-2.7c0 4.7-7 14.7-7 14.7z"/></svg><i></i></div>
+<div id="crank" aria-label="Category ranking"><svg class="mark tr" viewBox="0 0 40 44"><path class="s" d="M10 8H5.5v3.5a7.5 7.5 0 0 0 7 7.4"/><path class="s" d="M30 8h4.5v3.5a7.5 7.5 0 0 1-7 7.4"/><path class="f" d="M9.5 5h21v8.5a10.5 10.5 0 0 1-21 0z"/><path class="s2" d="M20 24.5v6.5"/><path class="s2" d="M12.5 38.5h15"/><path class="f" d="M15 31.5h10l1.5 5h-13z"/><text x="20" y="17"></text></svg><svg class="mark hs" viewBox="0 0 40 40"><path class="f" d="M20 35S4 24.5 4 14.2A8.6 8.6 0 0 1 20 9.6a8.6 8.6 0 0 1 16-4.6c0 10.3-16 30-16 30z"/><text x="20" y="23"></text></svg></div>
 
 <div id="board" role="dialog" aria-modal="true" aria-label="Tally">
   <div id="boardPanel">
@@ -571,8 +563,8 @@ function attach(el){
 function catTotals(){
   const sum = {};
   files.forEach(f => {
-    const c = f.cat || "Uncategorised";
-    sum[c] = (sum[c] || 0) + (counts[f.id] || 0);
+    if (!f.cat) return;                     // loose in the main folder — no category
+    sum[f.cat] = (sum[f.cat] || 0) + (counts[f.id] || 0);
   });
   return sum;
 }
@@ -602,25 +594,24 @@ function paintLike(){
   if (!f){ b.classList.remove("on"); r.classList.remove("on"); return; }
   const n = counts[f.id] || 0;
   b.classList.add("on");
-  b.classList.toggle("has", n > 0);
-  $("#likeCnt").textContent = n > 99 ? "99+" : n;
+  $("#likeNum").textContent = n ? (n > 99 ? "99+" : n) : "";
 
   const place = rankOf(f.id);
   r.classList.toggle("on", place > 0);
   r.classList.remove("r1", "r2", "r3");
   if (place){
-    r.querySelector("b").textContent = place;
+    r.querySelector("text").textContent = place;
     if (place <= 3) r.classList.add("r" + place);   // gold, silver, bronze
   }
 
   const cr = $("#crank");
-  const cname = f.cat || "Uncategorised";
+  const cname = f.cat;                      // "" for loose videos → no ribbon
   const cplace = rankOfCat(cname);
   cr.classList.toggle("on", cplace > 0);
   cr.classList.remove("r1", "r2", "r3");
   if (cplace){
-    cr.querySelector("b").textContent = cplace;
-    cr.querySelector("i").textContent = catTotals()[cname] || 0;
+    cr.querySelector(".tr text").textContent = cplace;
+    cr.querySelector(".hs text").textContent = catTotals()[cname] || 0;
     if (cplace <= 3) cr.classList.add("r" + cplace);
   }
 }
@@ -869,7 +860,7 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v20`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v23`;
   paintLike();
 }
 
