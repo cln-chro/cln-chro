@@ -372,6 +372,7 @@ async function loadFiles(){
     $("#signin").textContent = "Reading tallies…";
     await loadTallies();
     const nStar = files.filter(f => f.starred).length;
+    const nQual = files.filter(f => f.starred && (counts[f.id] || 0) >= 2).length;
     const nCat  = new Set(files.map(f => f.cat).filter(Boolean)).size;
     shuffle();
     gate.style.display = "none";
@@ -379,27 +380,46 @@ async function loadFiles(){
     $("#top").classList.add("on");
     render();
     setTimeout(() => toast(
-      `${files.length} videos · ${nStar || "no"} starred · ${nCat || "no"} categories`), 600);
+      `${files.length} videos · ${nStar || "no"} starred `
+      + `(${nQual} with 2+ likes) · ${nCat || "no"} categories`), 600);
   }catch(e){ fail(e.message); }
 }
 
 function shuffle(){
-  /* Starred videos are held back, then paced in: ten plain ones first, the
-     first starred at position 11, then every third from there (14, 17, 20…).
-     Like counts play no part in this — ordering is starred-only. */
+  /* Six plain videos, the first starred at position 7, then every third
+     (10, 13, 16 …). From position 19 on, a starred slot must be one with
+     2+ likes, so the earlier slots deliberately take the less-liked starred
+     ones and leave the proven ones for 19 onward. Once the proven ones are
+     spent the starred slots stop, and any starred videos still unplayed
+     rejoin the ordinary rotation rather than disappearing from the feed. */
   const pick = a => a.splice(Math.floor(Math.random() * a.length), 1)[0];
-  const star  = files.filter(f => f.starred);
-  const plain = files.filter(f => !f.starred);
+  const proven = files.filter(f => f.starred && (counts[f.id] || 0) >= 2);
+  const rest   = files.filter(f => f.starred && (counts[f.id] || 0) < 2);
+  const plain  = files.filter(f => !f.starred);
   const out = [];
-  let untilStar = 10;                 // ten plain, so #11 is the first starred
+  let untilStar = 6;                      // six plain, so #7 is the first starred
 
-  while (star.length || plain.length){
-    if (untilStar > 0 && plain.length){ out.push(pick(plain)); untilStar--; }
-    else if (star.length){
-      out.push(pick(star));
-      untilStar = plain.length ? 2 : 0;   // two plain between starred = every 3rd
+  while (proven.length || rest.length || plain.length){
+    const pos = out.length + 1;           // 1-based position this slot will take
+
+    if (pos >= 19 && !proven.length){
+      if (rest.length){ plain.push(...rest); rest.length = 0; }
+      untilStar = Infinity;               // no more reserved slots
     }
-    else out.push(pick(plain));
+
+    if (untilStar > 0 && plain.length){ out.push(pick(plain)); untilStar--; continue; }
+
+    const first  = pos >= 19 ? proven : rest;
+    const second = pos >= 19 ? [] : proven;
+    const f = first.length ? pick(first) : (second.length ? pick(second) : null);
+
+    if (f){
+      out.push(f);
+      untilStar = plain.length ? 2 : 0;   // two plain between starred = every 3rd
+    } else if (plain.length){
+      out.push(pick(plain));
+      untilStar = 2;
+    } else break;
   }
   files = out;
 }
@@ -860,7 +880,7 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v24`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v26`;
   paintLike();
 }
 
