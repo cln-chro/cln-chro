@@ -133,6 +133,39 @@
              font-size:17px;line-height:1;flex:none}
   #boardEmpty{padding:26px 16px;text-align:center;color:var(--muted);font-size:13px;line-height:1.6}
 
+  /* end-session button */
+  #end{position:fixed;right:14px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:6;
+       display:none;align-items:center;gap:6px;height:30px;padding:0 12px 0 10px;border-radius:999px;
+       border:1px solid rgba(244,242,238,.22);background:rgba(18,18,20,.6);backdrop-filter:blur(8px);
+       color:var(--ink);font-size:12px;font-weight:600}
+  #end.on{display:flex}
+  #end:active{transform:scale(.95)}
+  #end svg{width:13px;height:13px;fill:none;stroke:var(--ink);stroke-width:1.9;stroke-linejoin:round}
+
+  /* montage overlay */
+  #mwrap{position:fixed;inset:0;z-index:7;display:none;pointer-events:none}
+  body.montage #mwrap{display:block}
+  body.montage #like,body.montage #rank,body.montage #crank,
+  body.montage #pos,body.montage #reshuffle,body.montage #end{display:none}
+  #mtop{position:absolute;top:calc(env(safe-area-inset-top) + 14px);left:0;right:0;text-align:center;
+        font-size:11px;font-weight:700;letter-spacing:.14em;color:rgba(244,242,238,.75);
+        text-shadow:0 1px 10px #000}
+  #mnum{position:absolute;left:0;right:0;top:46%;transform:translateY(-50%);text-align:center;
+        font-size:96px;font-weight:800;color:rgba(255,255,255,.9);letter-spacing:-.04em;
+        text-shadow:0 3px 24px rgba(0,0,0,.9);line-height:1}
+  #mnum span{font-size:34px;vertical-align:super;opacity:.75;margin-right:2px}
+  #mlikes{position:absolute;left:0;right:0;top:63%;display:flex;justify-content:center;align-items:center;gap:6px}
+  #mlikes svg{width:20px;height:20px;fill:var(--like);stroke:var(--like);stroke-width:1.4;
+              filter:drop-shadow(0 1px 3px rgba(0,0,0,.8))}
+  #mlikes b{font-size:19px;font-weight:800;color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.9)}
+  #msegs{position:absolute;left:14px;right:14px;bottom:calc(52px + env(safe-area-inset-bottom));display:flex;gap:3px}
+  #msegs .seg{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.2)}
+  #msegs .seg.done{background:rgba(255,255,255,.75)}
+  #msegs .seg.now{background:rgba(255,255,255,.75);animation:none}
+  #mexit{position:absolute;right:14px;bottom:calc(14px + env(safe-area-inset-bottom));pointer-events:auto;
+         font-size:12px;color:rgba(244,242,238,.78);border:1px solid rgba(244,242,238,.22);
+         border-radius:999px;padding:5px 11px;background:rgba(18,18,20,.6);backdrop-filter:blur(8px)}
+
   #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(12px);z-index:40;
          background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:9px 16px;font-size:13px;
          opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;white-space:nowrap;max-width:86vw;overflow:hidden;text-overflow:ellipsis}
@@ -178,6 +211,20 @@
 </div>
 
 <div id="feed" aria-label="Video feed"></div>
+<button id="end" aria-label="End session">
+  <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>End</button>
+
+<div id="mwrap">
+  <div id="mtop">TOP 10 · COUNTING DOWN</div>
+  <div id="mnum"><span>#</span><b></b></div>
+  <div id="mlikes">
+    <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.6-7-9.3A4 4 0 0 1 12 8a4 4 0 0 1 7-2.7c0 4.7-7 14.7-7 14.7z"/></svg>
+    <b></b>
+  </div>
+  <div id="msegs"></div>
+  <button id="mexit">Exit</button>
+</div>
+
 <div id="toast"></div>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -198,6 +245,9 @@ const TALLY_FILE = "reel-tallies.json";
 const $ = s => document.querySelector(s);
 const feed = $("#feed"), gate = $("#gate");
 let token = null, files = [], muted = true, tokenClient = null;
+let allFiles = [];               // the whole library, untouched by montage mode
+let montage = null;              // [{f, n, rank}] while the countdown is playing
+let mTimer = null;
 let current = 0;                 // index of the reel on screen
 let counts = {};                 // {fileId: likes} — display only, never affects order
 let folders = {};                // {folderId: name} — subfolders act as categories
@@ -368,6 +418,7 @@ async function loadFiles(){
     if (!files.length) return fail(FOLDER_ID ? "No videos in that folder — check the folder ID." : "No videos found in this account.");
 
     files.forEach(f => { f.cat = folders[(f.parents || [])[0]] || ""; });
+    allFiles = files.slice();
 
     $("#signin").textContent = "Reading tallies…";
     await loadTallies();
@@ -378,6 +429,7 @@ async function loadFiles(){
     gate.style.display = "none";
     feed.classList.add("on");
     $("#top").classList.add("on");
+    $("#end").classList.add("on");
     render();
     setTimeout(() => toast(
       `${files.length} videos · ${nStar || "no"} starred `
@@ -386,40 +438,46 @@ async function loadFiles(){
 }
 
 function shuffle(){
-  /* Six plain videos, the first starred at position 7, then every third
-     (10, 13, 16 …). From position 19 on, a starred slot must be one with
-     2+ likes, so the earlier slots deliberately take the less-liked starred
-     ones and leave the proven ones for 19 onward. Once the proven ones are
-     spent the starred slots stop, and any starred videos still unplayed
-     rejoin the ordinary rotation rather than disappearing from the feed. */
+  /* The feed tightens the further you go:
+       1-6    plain
+       7-18   a starred video every third (7, 10, 13, 16), drawn from the
+              less-liked ones so the proven favourites survive to 19
+       19-25  every other video is starred with 2+ likes (19, 21, 23, 25)
+       26+    every video is starred with 2+ likes, until they run out
+       after  back to one starred every third, then plain once those are gone
+     Nothing is ever dropped — whatever is left plays out normally. */
   const pick = a => a.splice(Math.floor(Math.random() * a.length), 1)[0];
   const proven = files.filter(f => f.starred && (counts[f.id] || 0) >= 2);
   const rest   = files.filter(f => f.starred && (counts[f.id] || 0) < 2);
   const plain  = files.filter(f => !f.starred);
   const out = [];
-  let untilStar = 6;                      // six plain, so #7 is the first starred
+  let spent = false, tailFrom = null;     // "spent" = the proven ones are used up
 
   while (proven.length || rest.length || plain.length){
-    const pos = out.length + 1;           // 1-based position this slot will take
+    const pos = out.length + 1;
+    if (pos >= 19 && !proven.length) spent = true;
 
-    if (pos >= 19 && !proven.length){
-      if (rest.length){ plain.push(...rest); rest.length = 0; }
-      untilStar = Infinity;               // no more reserved slots
+    let want;
+    if (!spent){
+      if (pos <= 6)       want = "plain";
+      else if (pos <= 18) want = (pos - 7) % 3 === 0 ? "starred" : "plain";
+      else if (pos <= 25) want = (pos - 19) % 2 === 0 ? "proven"  : "plain";
+      else                want = "proven";
+    } else {
+      if (tailFrom === null) tailFrom = pos;
+      want = (pos - tailFrom) % 3 === 0 ? "starred" : "plain";
     }
 
-    if (untilStar > 0 && plain.length){ out.push(pick(plain)); untilStar--; continue; }
+    let f = null;
+    if (want === "proven")       f = proven.length ? pick(proven) : null;
+    else if (want === "starred") f = rest.length ? pick(rest) : (proven.length ? pick(proven) : null);
+    else                         f = plain.length ? pick(plain) : null;
 
-    const first  = pos >= 19 ? proven : rest;
-    const second = pos >= 19 ? [] : proven;
-    const f = first.length ? pick(first) : (second.length ? pick(second) : null);
-
-    if (f){
-      out.push(f);
-      untilStar = plain.length ? 2 : 0;   // two plain between starred = every 3rd
-    } else if (plain.length){
-      out.push(pick(plain));
-      untilStar = 2;
-    } else break;
+    if (!f) f = plain.length  ? pick(plain)        // whatever is still available
+          : rest.length    ? pick(rest)
+          : proven.length  ? pick(proven) : null;
+    if (!f) break;
+    out.push(f);
   }
   files = out;
 }
@@ -582,7 +640,7 @@ function attach(el){
 /* Likes summed per category, from the folder each video sits in. */
 function catTotals(){
   const sum = {};
-  files.forEach(f => {
+  (allFiles.length ? allFiles : files).forEach(f => {
     if (!f.cat) return;                     // loose in the main folder — no category
     sum[f.cat] = (sum[f.cat] || 0) + (counts[f.id] || 0);
   });
@@ -667,6 +725,98 @@ function bumpLike(by){
   b.addEventListener("contextmenu", e => e.preventDefault());
 })();
 
+/* ---------------- montage ----------------
+   Tap End: flush the tallies, then play the top-ranked videos for five
+   seconds each, counting down to #1. Ties share a rank, as they do on the
+   badges, and the whole thing is capped at 15 so a wide tie at the cutoff
+   can't turn into a four-minute reel. */
+const MONTAGE_SECS = 5, MONTAGE_MAX = 15;
+
+function topRanked(){
+  const liked = (allFiles.length ? allFiles : files)
+    .filter(f => (counts[f.id] || 0) > 0);
+  if (!liked.length) return [];
+
+  const ranked = liked.map(f => {
+    const n = counts[f.id] || 0;
+    const better = liked.filter(x => (counts[x.id] || 0) > n).length;
+    return { f, n, rank: better + 1 };
+  }).filter(r => r.rank <= 10)
+    .sort((a, b) => a.rank - b.rank);
+
+  let sel = ranked;
+  if (sel.length > MONTAGE_MAX){
+    /* Trim inside the tied group at the boundary rather than cutting
+       arbitrarily across ranks. */
+    const edge = Math.max(...sel.map(r => r.rank));
+    const keep = sel.filter(r => r.rank < edge);
+    const tied = sel.filter(r => r.rank === edge);
+    for (let i = tied.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      [tied[i], tied[j]] = [tied[j], tied[i]];
+    }
+    sel = keep.concat(tied.slice(0, Math.max(0, MONTAGE_MAX - keep.length)));
+    sel = sel.slice(0, MONTAGE_MAX);
+  }
+  return sel.sort((a, b) => b.rank - a.rank || b.n - a.n);   // countdown
+}
+
+function startMontage(){
+  const sel = topRanked();
+  if (!sel.length) return toast("No likes yet — nothing to play");
+  saveTallies();                                  // make this session durable now
+  montage = sel;
+  files = sel.map(x => x.f);
+  document.body.classList.add("montage");
+
+  const segs = $("#msegs");
+  segs.innerHTML = "";
+  sel.forEach(() => segs.appendChild(Object.assign(document.createElement("div"), { className: "seg" })));
+
+  current = 0;
+  render();
+  feed.scrollTop = 0;
+  paintMontage();
+}
+
+function exitMontage(){
+  clearTimeout(mTimer); mTimer = null;
+  if (!montage) return;
+  montage = null;
+  document.body.classList.remove("montage");
+  files = allFiles.slice();
+  shuffle();
+  current = 0;
+  render();
+  feed.scrollTop = 0;
+}
+
+function paintMontage(){
+  if (!montage) return;
+  const m = montage[current];
+  if (!m) return;
+  $("#mnum b").textContent = m.rank;
+  $("#mlikes b").textContent = m.n;
+  [...$("#msegs").children].forEach((el, i) => {
+    el.className = "seg" + (i < current ? " done" : i === current ? " now" : "");
+  });
+}
+
+/* Armed when a clip actually starts, so a slow download doesn't eat its
+   five seconds. The last one is left looping rather than dumping you out. */
+function armMontage(){
+  clearTimeout(mTimer);
+  if (!montage) return;
+  if (current >= montage.length - 1) return;
+  mTimer = setTimeout(() => {
+    if (!montage) return;
+    feed.scrollTo({ top: (current + 1) * feed.clientHeight, behavior: "smooth" });
+  }, MONTAGE_SECS * 1000);
+}
+
+$("#end").onclick = startMontage;
+$("#mexit").onclick = exitMontage;
+
 /* ---------------- tally board ---------------- */
 let boardMode = "v";                     // "v" videos, "c" categories
 
@@ -690,7 +840,7 @@ function boardRow(i, mark, label, n, top, hue, onTap){
 
 function renderVideos(){
   const rows = $("#rows");
-  const ranked = files.map(f => ({ f, n: counts[f.id] || 0 }))
+  const ranked = (allFiles.length ? allFiles : files).map(f => ({ f, n: counts[f.id] || 0 }))
                       .filter(x => x.n > 0)
                       .sort((a, b) => b.n - a.n);
   $("#boardEmpty").textContent = "No likes yet. Tap the heart on a video to start counting.";
@@ -834,6 +984,7 @@ async function tryPlay(el, attempt = 0){
   try{
     await v.play();
     el.classList.remove("paused");
+    if (montage){ v.currentTime = 0; armMontage(); }
     return;
   }catch(e){
     /* AbortError = something paused it mid-request; NotAllowedError = autoplay refused.
@@ -880,8 +1031,9 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v26`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v28`;
   paintLike();
+  if (montage){ paintMontage(); armMontage(); }
 }
 
 /* React only once scrolling settles, so a fast swipe-through
