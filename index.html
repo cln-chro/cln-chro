@@ -416,7 +416,7 @@ async function loadFiles(){
     files = []; let pageToken = "";
     do{
       const url = `https://www.googleapis.com/drive/v3/files?q=${q}`
-                + `&fields=nextPageToken,files(id,name,size,mimeType,starred,parents,videoMediaMetadata(durationMillis))&pageSize=200&orderBy=name`
+                + `&fields=nextPageToken,files(id,name,size,mimeType,starred,parents,videoMediaMetadata(durationMillis,width,height))&pageSize=200&orderBy=name`
                 + `&supportsAllDrives=true&includeItemsFromAllDrives=true`
                 + (pageToken ? `&pageToken=${pageToken}` : "");
       const data = await (await api(url)).json();
@@ -433,6 +433,8 @@ async function loadFiles(){
     await loadTallies();
     const nStar = files.filter(f => f.starred).length;
     const nQual = files.filter(f => f.starred && (counts[f.id] || 0) >= 2).length;
+    const heavy = files.filter(f => (+f.size || 0) > 90 * 1048576);
+    const bytes = files.reduce((a, f) => a + (+f.size || 0), 0);
     const nCat  = new Set(files.map(f => f.cat).filter(Boolean)).size;
     shuffle();
     gate.style.display = "none";
@@ -443,6 +445,11 @@ async function loadFiles(){
     setTimeout(() => toast(
       `${files.length} videos · ${nStar || "no"} starred `
       + `(${nQual} with 2+ likes) · ${nCat || "no"} categories`), 600);
+    /* Files this large are the usual reason a clip won't play: the browser
+       has to hold the whole thing in memory before a phone decoder sees it. */
+    if (heavy.length) setTimeout(() => toast(
+      `${heavy.length} of ${files.length} are over 90 MB — those may not play`
+      + ` · library ${fmtSize(bytes)}, average ${fmtSize(Math.round(bytes / files.length))}`), 4200);
   }catch(e){ fail(e.message); }
 }
 
@@ -503,7 +510,9 @@ function reelEl(f, n){
   el.dataset.id = f.id;
   el.dataset.mime = f.mimeType || "video/mp4";
   el.dataset.size = f.size || "";
-  el.dataset.dur  = (f.videoMediaMetadata && f.videoMediaMetadata.durationMillis) || "";
+  const vm = f.videoMediaMetadata || {};
+  el.dataset.dur = vm.durationMillis || "";
+  el.dataset.dim = (vm.width && vm.height) ? vm.width + "x" + vm.height : "";
   el.innerHTML = `
     <div class="load">
       <div>
@@ -587,6 +596,15 @@ function makeVideo(){
     }
     /* A prefix that won't decode means the file isn't laid out faststart,
        so fetch the whole thing before giving up on it. */
+    if (el._triedStream && !el._noStream){
+      streamOK = false;
+      release(el);
+      el._noStream = true;
+      el._recovering = true;
+      load(el);
+      return;
+    }
+    if (el._recovering) return;
     if ((code === 4 || code === 3) && el._partial && !el._full){
       prefixOK = false;
       el._full = true;
@@ -607,9 +625,15 @@ function makeVideo(){
       if (expect && got < expect) toast("Re-downloading — the first copy came up short");
       return;
     }
-    showError(el, code === 4
-      ? `Can't decode: ${fmtSize(el._size || 0)} of ${fmtSize(+el.dataset.size || 0)}. Tap Retry.`
-      : "Playback failed (media error " + (code ?? "?") + ") — tap Retry.");
+    const big = (+el.dataset.size || 0) > 90 * 1048576;
+    showError(el, code !== 4
+      ? "Playback failed (media error " + (code ?? "?") + ") — tap Retry."
+      : big
+        ? `Too big for the browser to decode — ${fmtSize(+el.dataset.size)}`
+          + (el.dataset.dim ? `, ${el.dataset.dim}` : "")
+          + ". Convert this one to a smaller MP4."
+        : `Can't decode: ${fmtSize(el._size || 0)} of ${fmtSize(+el.dataset.size || 0)}`
+          + (el.dataset.dim ? ` (${el.dataset.dim})` : "") + ". Tap Retry.");
   });
 
   v.addEventListener("timeupdate", () => {
@@ -650,6 +674,7 @@ function labels(el){
 }
 
 function attach(el){
+  el._recovering = false;
   const type = labels(el)[el._try];
   let v = el.querySelector("video");
   if (!v){ v = takeVideo(); el.insertBefore(v, el.firstChild); }
@@ -864,6 +889,11 @@ let mWaited = 0;
    phone editors put it at the end instead, and then only the whole file
    will do. Unknown until the first attempt tells us. */
 let prefixOK = null;
+/* Whether the video element can pull straight from Drive instead of us
+   downloading the whole file into memory first. Native streaming keeps only
+   a few seconds buffered, so size stops mattering — but it needs the token
+   in the URL, which Google has been retiring. One attempt tells us. */
+let streamOK = null;
 const failures = [];       // anything that would not play, for the Issues tab
 function armMontage(){
   clearTimeout(mTimer);
@@ -990,7 +1020,8 @@ function renderIssues(){
     row.innerHTML = '<div class="rowTxt"><div class="t"></div><div class="s"></div></div>';
     row.querySelector(".t").textContent = x.name;
     row.querySelector(".s").textContent =
-      fmtSize(x.size) + " · " + x.mime.replace("video/", "") + " · " + x.why;
+      [fmtSize(x.size), x.dim, x.secs ? x.secs + "s" : null,
+       x.mime.replace("video/", "")].filter(Boolean).join(" · ") + " — " + x.why;
     rows.appendChild(row);
   });
 }
@@ -1022,8 +1053,12 @@ function showError(el, msg){
   }
   const rec = files[indexOf(el)];
   if (rec && !failures.some(x => x.id === rec.id)){
+    const vm = rec.videoMediaMetadata || {};
     failures.push({ id: rec.id, name: rec.name, size: +rec.size || 0,
-                    mime: rec.mimeType || "?", why: msg });
+                    mime: rec.mimeType || "?",
+                    dim: (vm.width && vm.height) ? vm.width + "×" + vm.height : "?",
+                    secs: vm.durationMillis ? Math.round(vm.durationMillis / 1000) : 0,
+                    why: msg });
   }
   const l = el.querySelector(".load");
   l.classList.remove("hide"); l.classList.add("err");
@@ -1034,6 +1069,24 @@ function showError(el, msg){
 async function load(el, attempt = 0){
   if (el._url || el._ctrl) return;                 // already loaded or in flight
   if (!token){ showError(el, "Session expired — reload."); return; }
+
+  /* Try letting the browser stream it. If Drive accepts the token this way,
+     nothing is held in memory and a 137 MB file plays like any other. */
+  if (streamOK !== false && !el._noStream){
+    const v = el.querySelector("video") || (() => {
+      const nv = takeVideo(); el.insertBefore(nv, el.firstChild); return nv;
+    })();
+    el._streamed = true;
+    el._triedStream = true;                        // survives release(), unlike _streamed
+    el._url = `https://www.googleapis.com/drive/v3/files/${el.dataset.id}`
+            + `?alt=media&supportsAllDrives=true&access_token=${encodeURIComponent(token)}`;
+    v.src = el._url;
+    v.muted = muted;
+    v.load();
+    el.querySelector(".load").classList.add("hide");
+    if (indexOf(el) === current) tryPlay(el);
+    return;
+  }
 
   const ctrl = new AbortController();
   el._ctrl = ctrl;
@@ -1120,8 +1173,13 @@ function release(el){
   const v = el.querySelector("video");
   if (v) parkVideo(v);
 
-  if (el._url){ URL.revokeObjectURL(el._url); el._url = null; }
-  el._bytes = null; el._try = 0; el._size = 0; el._redl = 0; el._partial = false;
+  if (el._url){
+    if (!el._streamed) URL.revokeObjectURL(el._url);
+    el._url = null;
+  }
+  el._streamed = false;
+  el._bytes = null; el._try = 0; el._size = 0; el._redl = 0;
+  el._partial = false; el._noStream = false; el._triedStream = false;
 
   const l = el.querySelector(".load");
   l.classList.remove("hide", "err");
@@ -1138,6 +1196,7 @@ async function tryPlay(el, attempt = 0){
     await v.play();
     el.classList.remove("paused");
     if (el._partial) prefixOK = true;             // prefixes are fine here
+    if (el._streamed) streamOK = true;            // native streaming works
     if (montage){ v.currentTime = 0; armMontage(); }
     return;
   }catch(e){
@@ -1151,6 +1210,15 @@ async function tryPlay(el, attempt = 0){
     /* A prefix that won't decode arrives here as a rejected play(), not as
        a media error event, so the refetch has to be triggered from here too.
        One failure is enough to know this library isn't faststart. */
+    if (el._triedStream && !el._noStream){
+      streamOK = false;                            // Drive refused the URL token
+      release(el);
+      el._noStream = true;                         // release() clears flags
+      el._recovering = true;                       // silence the other handler
+      load(el);
+      return;
+    }
+    if (el._recovering) return;
     if (el._partial && !el._full){
       prefixOK = false;
       el._full = true;
@@ -1205,7 +1273,7 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v39`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v44`;
   paintLike();
   if (montage){
     clearTimeout(mTimer);          // the next clip starts its own five seconds
