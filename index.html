@@ -165,6 +165,10 @@
   #msegs .seg{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.2)}
   #msegs .seg.done{background:rgba(255,255,255,.75)}
   #msegs .seg.now{background:rgba(255,255,255,.75);animation:none}
+  #mcat{position:absolute;left:0;right:0;top:70%;text-align:center;display:none;
+        font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+        text-shadow:0 1px 10px rgba(0,0,0,.9)}
+  #mcat.on{display:block}
   #mwait{position:absolute;left:0;right:0;bottom:calc(72px + env(safe-area-inset-bottom));
          text-align:center;font-size:11px;letter-spacing:.06em;color:rgba(244,242,238,.6);
          text-shadow:0 1px 8px #000;display:none}
@@ -230,6 +234,7 @@
     <b></b>
   </div>
   <div id="msegs"></div>
+  <div id="mcat"></div>
   <div id="mwait">loading next…</div>
   <button id="mexit">Exit</button>
 </div>
@@ -785,6 +790,8 @@ function bumpLike(by){
    badges, and the whole thing is capped at 15 so a wide tie at the cutoff
    can't turn into a four-minute reel. */
 const MONTAGE_SECS = 5, MONTAGE_MAX = 15;
+const CAT_SECS = 4;                 // the category reel moves a little quicker
+let montageAct = 1;                 // 1 = top videos, 2 = top categories
 
 function topRanked(){
   const liked = (allFiles.length ? allFiles : files)
@@ -841,6 +848,8 @@ async function startMontage(){
   if (!sel.length) return toast("No likes yet — nothing to play");
   await probePrefix(sel[0].f);
   saveTallies();                                  // make this session durable now
+  montageAct = 1;
+  $("#mtop").textContent = "TOP 10 · COUNTING DOWN";
   montage = sel;
   files = sel.map(x => x.f);
   document.body.classList.add("montage");
@@ -857,10 +866,56 @@ async function startMontage(){
   toast("Preparing your top " + sel.length + "…");
 }
 
+/* The ten best-liked categories, each represented by its own most-liked
+   clip. A video can appear here as well as in the first reel — the point is
+   to show what each category's winner is, not to avoid repeats. */
+function topCategories(){
+  const sum = catTotals();
+  const ranked = Object.entries(sum)
+    .filter(([, n]) => n > 0)
+    .map(([name, n]) => ({ name, n, better: 0 }));
+  ranked.forEach(r => { r.rank = ranked.filter(x => x.n > r.n).length + 1; });
+
+  return ranked
+    .filter(r => r.rank <= 10)
+    .map(r => {
+      const best = (allFiles.length ? allFiles : files)
+        .filter(f => f.cat === r.name && (counts[f.id] || 0) > 0)
+        .sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0))[0];
+      return best ? { f: best, n: r.n, rank: r.rank, cat: r.name,
+                      clipLikes: counts[best.id] || 0 } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.rank - a.rank || b.n - a.n);     // countdown
+}
+
+async function startCategoryMontage(){
+  const sel = topCategories();
+  if (!sel.length){ exitMontage(); return toast("No categories with likes yet"); }
+  montageAct = 2;
+  montage = sel;
+  files = sel.map(x => x.f);
+  document.body.classList.add("montage");
+  $("#mtop").textContent = "TOP CATEGORIES · COUNTING DOWN";
+
+  const segs = $("#msegs");
+  segs.innerHTML = "";
+  sel.forEach(() => segs.appendChild(Object.assign(document.createElement("div"), { className: "seg" })));
+
+  current = 0;
+  render();
+  feed.scrollTop = 0;
+  paintMontage();
+  toast("Now the top " + sel.length + " categories");
+}
+
 function exitMontage(){
   clearTimeout(mTimer); mTimer = null;
   if (!montage) return;
   montage = null;
+  montageAct = 1;
+  $("#mtop").textContent = "TOP 10 · COUNTING DOWN";
+  $("#mcat").classList.remove("on");
   document.body.classList.remove("montage");
   files = allFiles.slice();
   shuffle();
@@ -875,6 +930,12 @@ function paintMontage(){
   if (!m) return;
   $("#mnum b").textContent = m.rank;
   $("#mlikes b").textContent = m.n;
+  const cl = $("#mcat");
+  if (montageAct === 2 && m.cat){
+    cl.textContent = m.cat + " · top clip " + m.clipLikes + "\u2665";
+    cl.style.color = `hsl(${hueOf(m.cat)} 70% 68%)`;
+    cl.classList.add("on");
+  } else cl.classList.remove("on");
   $("#mwait").classList.remove("on");
   [...$("#msegs").children].forEach((el, i) => {
     el.className = "seg" + (i < current ? " done" : i === current ? " now" : "");
@@ -928,7 +989,13 @@ const failures = [];       // anything that would not play, for the Issues tab
 function armMontage(){
   clearTimeout(mTimer);
   if (!montage) return;
+  const secs = montageAct === 2 ? CAT_SECS : MONTAGE_SECS;
+
   if (current >= montage.length - 1){
+    if (montageAct === 1){
+      mTimer = setTimeout(startCategoryMontage, secs * 1000);   // on to the categories
+      return;
+    }
     /* The finale repeats, but only the opening of the file was fetched, so
        native looping would run past the data it has. Restart it by hand. */
     mTimer = setTimeout(function again(){
@@ -936,12 +1003,12 @@ function armMontage(){
       if (!montage || !v) return;
       v.currentTime = 0;
       v.play().catch(() => {});
-      mTimer = setTimeout(again, MONTAGE_SECS * 1000);
-    }, MONTAGE_SECS * 1000);
+      mTimer = setTimeout(again, secs * 1000);
+    }, secs * 1000);
     return;
   }
   mWaited = 0;
-  mTimer = setTimeout(stepMontage, MONTAGE_SECS * 1000);
+  mTimer = setTimeout(stepMontage, secs * 1000);
 }
 
 function stepMontage(){
@@ -1322,7 +1389,7 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v50`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v51`;
   paintLike();
   if (montage){
     clearTimeout(mTimer);          // the next clip starts its own five seconds
