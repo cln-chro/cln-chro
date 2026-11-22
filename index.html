@@ -20,7 +20,12 @@
   #gate .inner{max-width:32ch}
   #gate h1{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
   #gate p{margin-top:12px;font-size:14px;line-height:1.6;color:var(--muted)}
-  .primary{margin-top:22px;padding:13px 24px;border-radius:999px;background:var(--lamp);color:#15120a;font-weight:600;font-size:15px}
+  #modes{display:flex;gap:7px;margin-top:24px;justify-content:center}
+  .mode{padding:9px 15px;border-radius:999px;border:1px solid var(--line);
+        background:var(--panel-2);color:var(--muted);font-size:13px;font-weight:600}
+  .mode.on{background:var(--lamp);border-color:var(--lamp);color:#15120a}
+  #modeNote{margin-top:10px;font-size:12px;line-height:1.5;color:var(--muted);min-height:2.4em}
+  .primary{margin-top:14px;padding:13px 24px;border-radius:999px;background:var(--lamp);color:#15120a;font-weight:600;font-size:15px}
   .primary:active{transform:scale(.97)}
   .primary[disabled]{opacity:.5}
   #gate .err{margin-top:16px;font-size:13px;line-height:1.55;color:var(--danger)}
@@ -190,6 +195,12 @@
   <div class="inner">
     <h1>Shuffle</h1>
     <p>Signs in to Drive, shuffles your folder, and plays it as a feed. Nothing is saved on this device — closing the tab ends the session.</p>
+    <div id="modes" role="group" aria-label="Feed order">
+      <button class="mode on" data-mode="default">Default</button>
+      <button class="mode" data-mode="tops">Tops</button>
+      <button class="mode" data-mode="random">Random</button>
+    </div>
+    <p id="modeNote">Starred clips ease in, then your favourites take over.</p>
     <button class="primary" id="signin">Connect Drive</button>
     <div class="err" id="gateErr"></div>
   </div>
@@ -260,6 +271,7 @@ const $ = s => document.querySelector(s);
 const feed = $("#feed"), gate = $("#gate");
 let token = null, files = [], muted = true, tokenClient = null;
 let allFiles = [];               // the whole library, untouched by montage mode
+let mode = "default";            // default | tops | random — only affects ordering
 let montage = null;              // [{f, n, rank}] while the countdown is playing
 let mTimer = null;
 let current = 0;                 // index of the reel on screen
@@ -286,6 +298,19 @@ function toast(msg){
 function fail(msg){ $("#gateErr").textContent = msg; $("#signin").disabled = false; $("#signin").textContent = "Try again"; }
 
 /* ---------------- auth ---------------- */
+const MODE_NOTE = {
+  default: "Starred clips ease in, then your favourites take over.",
+  tops:    "Your 15 most-liked first, shuffled, then down through the tiers.",
+  random:  "Everything in a plain random order."
+};
+document.querySelectorAll(".mode").forEach(b => {
+  b.onclick = () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll(".mode").forEach(x => x.classList.toggle("on", x === b));
+    $("#modeNote").textContent = MODE_NOTE[mode];
+  };
+});
+
 $("#signin").onclick = () => {
   if (CLIENT_ID.startsWith("PASTE_")) return fail("No client ID set — paste yours into CLIENT_ID near the top of the file.");
   if (!window.google?.accounts?.oauth2) return fail("Google's sign-in script didn't load. Check the connection and reload.");
@@ -460,31 +485,41 @@ async function loadFiles(){
   }catch(e){ fail(e.message); }
 }
 
-function shuffle(){
-  /* The feed tightens the further you go:
-       1-6    plain
-       7-18   a starred video every third (7, 10, 13, 16), drawn from the
-              less-liked ones so the proven favourites survive to 19
-       19-25  every other video is starred with 2+ likes (19, 21, 23, 25)
-       26+    every video is starred with 2+ likes, until they run out
-       after  back to one starred every third, then plain once those are gone
-     Nothing is ever dropped — whatever is left plays out normally. */
-  const pick = a => a.splice(Math.floor(Math.random() * a.length), 1)[0];
+const pickFrom = a => a.splice(Math.floor(Math.random() * a.length), 1)[0];
+
+function shuffled(a){
+  const out = a.slice();
+  for (let i = out.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/* "default" — the feed tightens the further you go:
+     1-6     plain
+     7-24    a starred video every third (7, 10, 13, 16, 19, 22), taken from
+             the less-liked ones so the proven favourites survive to 25
+     25-31   every other video is starred with 2+ likes (25, 27, 29, 31)
+     32+     every video is starred with 2+ likes, until they run out
+     after   back to one starred every third, then plain once those are gone
+   Nothing is ever dropped — whatever is left plays out normally. */
+function orderDefault(){
   const proven = files.filter(f => f.starred && (counts[f.id] || 0) >= 2);
   const rest   = files.filter(f => f.starred && (counts[f.id] || 0) < 2);
   const plain  = files.filter(f => !f.starred);
   const out = [];
-  let spent = false, tailFrom = null;     // "spent" = the proven ones are used up
+  let spent = false, tailFrom = null;
 
   while (proven.length || rest.length || plain.length){
     const pos = out.length + 1;
-    if (pos >= 19 && !proven.length) spent = true;
+    if (pos >= 25 && !proven.length) spent = true;
 
     let want;
     if (!spent){
       if (pos <= 6)       want = "plain";
-      else if (pos <= 18) want = (pos - 7) % 3 === 0 ? "starred" : "plain";
-      else if (pos <= 25) want = (pos - 19) % 2 === 0 ? "proven"  : "plain";
+      else if (pos <= 24) want = (pos - 7) % 3 === 0 ? "starred" : "plain";
+      else if (pos <= 31) want = (pos - 25) % 2 === 0 ? "proven"  : "plain";
       else                want = "proven";
     } else {
       if (tailFrom === null) tailFrom = pos;
@@ -492,17 +527,47 @@ function shuffle(){
     }
 
     let f = null;
-    if (want === "proven")       f = proven.length ? pick(proven) : null;
-    else if (want === "starred") f = rest.length ? pick(rest) : (proven.length ? pick(proven) : null);
-    else                         f = plain.length ? pick(plain) : null;
+    if (want === "proven")       f = proven.length ? pickFrom(proven) : null;
+    else if (want === "starred") f = rest.length ? pickFrom(rest) : (proven.length ? pickFrom(proven) : null);
+    else                         f = plain.length ? pickFrom(plain) : null;
 
-    if (!f) f = plain.length  ? pick(plain)        // whatever is still available
-          : rest.length    ? pick(rest)
-          : proven.length  ? pick(proven) : null;
+    if (!f) f = plain.length  ? pickFrom(plain)
+          : rest.length    ? pickFrom(rest)
+          : proven.length  ? pickFrom(proven) : null;
     if (!f) break;
     out.push(f);
   }
-  files = out;
+  return out;
+}
+
+/* "tops" — your fifteen most-liked first, shuffled among themselves, then
+   each lower tier of likes in turn, shuffled within the tier. Ends with
+   everything you've never liked, in random order. */
+function orderTops(){
+  const liked = files.filter(f => (counts[f.id] || 0) > 0)
+                     .sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0));
+  const cold  = files.filter(f => !(counts[f.id] || 0));
+
+  const head = shuffled(liked.slice(0, 15));
+  const tail = [];
+  let tier = [], at = null;
+  liked.slice(15).forEach(f => {
+    const n = counts[f.id] || 0;
+    if (at === null || n === at){ tier.push(f); at = n; }
+    else { tail.push(...shuffled(tier)); tier = [f]; at = n; }
+  });
+  if (tier.length) tail.push(...shuffled(tier));
+
+  return head.concat(tail, shuffled(cold));
+}
+
+/* "random" — no structure at all. */
+function orderRandom(){ return shuffled(files); }
+
+function shuffle(){
+  files = mode === "tops" ? orderTops()
+        : mode === "random" ? orderRandom()
+        : orderDefault();
 }
 
 $("#reshuffle").onclick = () => {
@@ -1389,7 +1454,7 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v51`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v53`;
   paintLike();
   if (montage){
     clearTimeout(mTimer);          // the next clip starts its own five seconds
