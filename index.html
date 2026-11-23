@@ -214,7 +214,9 @@
         border:1px solid rgba(244,242,238,.22);background:rgba(18,18,20,.6);backdrop-filter:blur(8px);
         color:var(--ink);font-size:12px;font-weight:600}
   #back.on{display:flex}
-  #back svg{width:14px;height:14px;fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  #back{max-width:52vw}
+  #back span,#back{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #back svg{flex:none;width:14px;height:14px;fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
   body.incat #pos{bottom:calc(54px + env(safe-area-inset-bottom))}
   body.montage #back{display:none}
   .catlab{cursor:pointer;pointer-events:auto}
@@ -296,8 +298,8 @@
   <div id="tiles"></div>
 </div>
 
-<button id="back" aria-label="Back to the full feed">
-  <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>All videos</button>
+<button id="back" aria-label="Back to the category">
+  <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Back</button>
 
 <div id="toast"></div>
 
@@ -982,10 +984,12 @@ function enterCategory(cat, startAt){
   catView = cat;
   files = videosIn(cat);
   document.body.classList.add("incat");
-  $("#back").classList.add("on");
+  const bk = $("#back");
+  bk.lastChild.nodeValue = cat;               // say where back goes
+  bk.classList.add("on");
   const at = startAt ? files.indexOf(startAt) : 0;
-  current = Math.max(0, at);
-  render();
+  render();                                   // render() resets the position…
+  current = Math.max(0, at);                  // …so set it afterwards
   feed.scrollTop = current * feed.clientHeight;
   updatePos(current);
   want();
@@ -1003,8 +1007,10 @@ function leaveCategory(){
   feed.scrollTop = 0;
 }
 
-$("#gridClose").onclick = closeGrid;
-$("#back").onclick = leaveCategory;
+/* Two steps out: back returns to the grid you picked from, and Done on the
+   grid drops you to the whole library. */
+$("#back").onclick = () => { if (catView) openGrid(catView); };
+$("#gridClose").onclick = () => { closeGrid(); leaveCategory(); };
 $("#grid").addEventListener("click", e => { if (e.target.id === "grid") closeGrid(); });
 
 /* ---------------- montage ----------------
@@ -1617,7 +1623,7 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v56`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v58`;
   paintLike();
   if (montage){
     clearTimeout(mTimer);          // the next clip starts its own five seconds
