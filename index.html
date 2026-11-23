@@ -182,6 +182,43 @@
          font-size:12px;color:rgba(244,242,238,.78);border:1px solid rgba(244,242,238,.22);
          border-radius:999px;padding:5px 11px;background:rgba(18,18,20,.6);backdrop-filter:blur(8px)}
 
+  /* category grid */
+  #grid{position:fixed;inset:0;z-index:24;display:none;background:var(--stage)}
+  #grid.show{display:flex;flex-direction:column}
+  .gridHead{display:flex;align-items:center;gap:12px;padding:calc(env(safe-area-inset-top) + 14px) 16px 12px;
+            border-bottom:1px solid var(--line);flex:none}
+  .gridHead h2{font-size:17px;font-weight:600;letter-spacing:-.01em;min-width:0;
+               overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gridHead .sub{font-size:12px;color:var(--muted);flex:none}
+  .gridHead .close{margin-left:auto;font-size:14px;color:var(--muted);flex:none;padding:4px}
+  /* align-content defaults to stretch, which resizes the rows and lets the
+     tiles overlap the row beneath. Pin the rows to the content instead. */
+  #tiles{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(3,1fr);
+         grid-auto-rows:min-content;align-content:start;
+         gap:6px;padding:10px 10px calc(16px + env(safe-area-inset-bottom))}
+  .tile{position:relative;aspect-ratio:9/16;border-radius:9px;overflow:hidden;
+        background:var(--panel-2);display:grid;place-items:center}
+  .tile img{width:100%;height:100%;object-fit:cover;display:block}
+  .tile .glyph{width:46px;height:46px}
+  .tile .nm{position:absolute;left:0;right:0;bottom:0;padding:14px 6px 5px;font-size:10px;
+            line-height:1.25;color:#fff;background:linear-gradient(to top,rgba(0,0,0,.85),transparent);
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tile .lk{position:absolute;top:5px;right:5px;min-width:17px;height:17px;padding:0 5px;
+            border-radius:9px;background:rgba(255,59,92,.9);color:#fff;font-size:10px;
+            font-weight:700;line-height:17px;text-align:center}
+  .tile:active{opacity:.7}
+
+  /* back out of a category feed */
+  #back{position:fixed;left:14px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:6;
+        display:none;align-items:center;gap:5px;height:30px;padding:0 13px 0 9px;border-radius:999px;
+        border:1px solid rgba(244,242,238,.22);background:rgba(18,18,20,.6);backdrop-filter:blur(8px);
+        color:var(--ink);font-size:12px;font-weight:600}
+  #back.on{display:flex}
+  #back svg{width:14px;height:14px;fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  body.incat #pos{bottom:calc(54px + env(safe-area-inset-bottom))}
+  body.montage #back{display:none}
+  .catlab{cursor:pointer;pointer-events:auto}
+
   #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(12px);z-index:40;
          background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:9px 16px;font-size:13px;
          opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;white-space:nowrap;max-width:86vw;overflow:hidden;text-overflow:ellipsis}
@@ -250,6 +287,18 @@
   <button id="mexit">Exit</button>
 </div>
 
+<div id="grid" role="dialog" aria-modal="true" aria-label="Category">
+  <div class="gridHead">
+    <h2 id="gridName"></h2>
+    <div class="sub" id="gridCount"></div>
+    <button class="close" id="gridClose">Done</button>
+  </div>
+  <div id="tiles"></div>
+</div>
+
+<button id="back" aria-label="Back to the full feed">
+  <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>All videos</button>
+
 <div id="toast"></div>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -272,6 +321,7 @@ const feed = $("#feed"), gate = $("#gate");
 let token = null, files = [], muted = true, tokenClient = null;
 let allFiles = [];               // the whole library, untouched by montage mode
 let mode = "default";            // default | tops | random — only affects ordering
+let catView = null;              // category name while browsing just that folder
 let montage = null;              // [{f, n, rank}] while the countdown is playing
 let mTimer = null;
 let current = 0;                 // index of the reel on screen
@@ -437,7 +487,11 @@ async function loadFiles(){
   try{
     await loadFolders();
 
-    const parts = ["mimeType contains 'video/'", "trashed = false"];
+    /* Drive stopped letting a file live in two folders in 2020; a shortcut
+       is the replacement. Pull those in too, so a video filed under a second
+       category through a shortcut counts for that category as well. */
+    const parts = ["(mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.shortcut')",
+                   "trashed = false"];
     if (FOLDER_ID){
       const ids = [FOLDER_ID, ...Object.keys(folders)];
       parts.push("(" + ids.map(id => `'${id}' in parents`).join(" or ") + ")");
@@ -446,7 +500,7 @@ async function loadFiles(){
     files = []; let pageToken = "";
     do{
       const url = `https://www.googleapis.com/drive/v3/files?q=${q}`
-                + `&fields=nextPageToken,files(id,name,size,mimeType,starred,parents,videoMediaMetadata(durationMillis,width,height))&pageSize=200&orderBy=name`
+                + `&fields=nextPageToken,files(id,name,size,mimeType,starred,parents,videoMediaMetadata(durationMillis,width,height),shortcutDetails(targetId),thumbnailLink)&pageSize=200&orderBy=name`
                 + `&supportsAllDrives=true&includeItemsFromAllDrives=true`
                 + (pageToken ? `&pageToken=${pageToken}` : "");
       const data = await (await api(url)).json();
@@ -454,9 +508,28 @@ async function loadFiles(){
       pageToken = data.nextPageToken || "";
     } while (pageToken && files.length < 3000);
 
+    /* Split the shortcuts back out: each one says "this video also belongs
+       to the folder the shortcut sits in". */
+    const extra = {};                       // targetId -> [category names]
+    const vids = [];
+    files.forEach(f => {
+      if (f.mimeType === "application/vnd.google-apps.shortcut"){
+        const target = f.shortcutDetails && f.shortcutDetails.targetId;
+        const cat = folders[(f.parents || [])[0]];
+        if (target && cat) (extra[target] = extra[target] || []).push(cat);
+      } else vids.push(f);
+    });
+    files = vids;
+
     if (!files.length) return fail(FOLDER_ID ? "No videos in that folder — check the folder ID." : "No videos found in this account.");
 
-    files.forEach(f => { f.cat = folders[(f.parents || [])[0]] || ""; });
+    files.forEach(f => {
+      const own = folders[(f.parents || [])[0]] || "";
+      const all = own ? [own] : [];
+      (extra[f.id] || []).forEach(c => { if (!all.includes(c)) all.push(c); });
+      f.cats = all;
+      f.cat  = all[0] || "";                // the one shown beside the clip
+    });
     allFiles = files.slice();
 
     swReady = await startWorker();
@@ -467,7 +540,7 @@ async function loadFiles(){
     const nQual = files.filter(f => f.starred && (counts[f.id] || 0) >= 2).length;
     const heavy = files.filter(f => (+f.size || 0) > 90 * 1048576);
     const bytes = files.reduce((a, f) => a + (+f.size || 0), 0);
-    const nCat  = new Set(files.map(f => f.cat).filter(Boolean)).size;
+    const nCat  = new Set(files.flatMap(f => f.cats || []).filter(Boolean)).size;
     shuffle();
     gate.style.display = "none";
     feed.classList.add("on");
@@ -604,7 +677,12 @@ function reelEl(f, n){
 
   if (f.cat){
     const c = el.querySelector(".catlab");
-    c.textContent = f.cat;
+    c.textContent = (f.cats && f.cats.length > 1) ? f.cats.join(" · ") : f.cat;
+    c.onclick = ev => {
+      ev.stopPropagation();
+      const list = f.cats && f.cats.length ? f.cats : [f.cat];
+      openGrid(list[0]);                      // first of its categories
+    };
     c.style.color = `hsl(${hueOf(f.cat)} 70% 68%)`;
     c.hidden = false;
   }
@@ -765,8 +843,10 @@ function attach(el){
 function catTotals(){
   const sum = {};
   (allFiles.length ? allFiles : files).forEach(f => {
-    if (!f.cat) return;                     // loose in the main folder — no category
-    sum[f.cat] = (sum[f.cat] || 0) + (counts[f.id] || 0);
+    const n = counts[f.id] || 0;
+    /* A video filed under two categories counts in full for both, so these
+       totals can add up to more than your total likes. */
+    (f.cats || (f.cat ? [f.cat] : [])).forEach(c => { sum[c] = (sum[c] || 0) + n; });
   });
   return sum;
 }
@@ -807,8 +887,12 @@ function paintLike(){
   }
 
   const cr = $("#crank");
-  const cname = f.cat;                      // "" for loose videos → no ribbon
-  const cplace = rankOfCat(cname);
+  /* In two categories, show whichever is doing better. */
+  let cname = "", cplace = 0;
+  (f.cats || (f.cat ? [f.cat] : [])).forEach(c => {
+    const r = rankOfCat(c);
+    if (r && (!cplace || r < cplace)){ cplace = r; cname = c; }
+  });
   cr.classList.toggle("on", cplace > 0);
   cr.classList.remove("r1", "r2", "r3");
   if (cplace){
@@ -848,6 +932,80 @@ function bumpLike(by){
   b.addEventListener("mouseup", end);
   b.addEventListener("contextmenu", e => e.preventDefault());
 })();
+
+/* ---------------- category browsing ----------------
+   Tap a category name under a clip to see everything filed there as a grid,
+   then tap one to watch just that category. The montage still reads the
+   whole library, so ending a session works the same from in here. */
+function videosIn(cat){
+  return (allFiles.length ? allFiles : files)
+    .filter(f => (f.cats || (f.cat ? [f.cat] : [])).includes(cat));
+}
+
+function openGrid(cat){
+  const vids = videosIn(cat);
+  if (!vids.length) return;
+  $("#gridName").textContent = cat;
+  $("#gridName").style.color = `hsl(${hueOf(cat)} 70% 68%)`;
+  $("#gridCount").textContent = vids.length + (vids.length === 1 ? " video" : " videos");
+
+  const tiles = $("#tiles");
+  tiles.innerHTML = "";
+  vids.forEach(f => {
+    const t = document.createElement("button");
+    t.className = "tile";
+    const n = counts[f.id] || 0;
+    t.innerHTML = (f.thumbnailLink
+        ? `<img alt="" loading="lazy" src="${f.thumbnailLink.replace(/=s\d+$/, "=s400")}">`
+        : avatar(f.id).replace('class="av"', 'class="glyph"'))
+      + `<div class="nm"></div>`
+      + (n ? `<div class="lk">${n > 99 ? "99+" : n}</div>` : "");
+    t.querySelector(".nm").textContent = f.name.replace(/\.[^.]+$/, "");
+
+    /* A thumbnail URL can expire; drop back to the glyph rather than
+       leaving a broken image in the grid. */
+    const img = t.querySelector("img");
+    if (img) img.onerror = () => {
+      img.outerHTML = avatar(f.id).replace('class="av"', 'class="glyph"');
+    };
+
+    t.onclick = () => enterCategory(cat, f);
+    tiles.appendChild(t);
+  });
+  $("#grid").classList.add("show");
+}
+
+function closeGrid(){ $("#grid").classList.remove("show"); }
+
+function enterCategory(cat, startAt){
+  closeGrid();
+  catView = cat;
+  files = videosIn(cat);
+  document.body.classList.add("incat");
+  $("#back").classList.add("on");
+  const at = startAt ? files.indexOf(startAt) : 0;
+  current = Math.max(0, at);
+  render();
+  feed.scrollTop = current * feed.clientHeight;
+  updatePos(current);
+  want();
+}
+
+function leaveCategory(){
+  if (!catView) return;
+  catView = null;
+  document.body.classList.remove("incat");
+  $("#back").classList.remove("on");
+  files = allFiles.slice();
+  shuffle();
+  current = 0;
+  render();
+  feed.scrollTop = 0;
+}
+
+$("#gridClose").onclick = closeGrid;
+$("#back").onclick = leaveCategory;
+$("#grid").addEventListener("click", e => { if (e.target.id === "grid") closeGrid(); });
 
 /* ---------------- montage ----------------
    Tap End: flush the tallies, then play the top-ranked videos for five
@@ -945,7 +1103,7 @@ function topCategories(){
     .filter(r => r.rank <= 10)
     .map(r => {
       const best = (allFiles.length ? allFiles : files)
-        .filter(f => f.cat === r.name && (counts[f.id] || 0) > 0)
+        .filter(f => (f.cats || [f.cat]).includes(r.name) && (counts[f.id] || 0) > 0)
         .sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0))[0];
       return best ? { f: best, n: r.n, rank: r.rank, cat: r.name,
                       clipLikes: counts[best.id] || 0 } : null;
@@ -982,8 +1140,13 @@ function exitMontage(){
   $("#mtop").textContent = "TOP 10 · COUNTING DOWN";
   $("#mcat").classList.remove("on");
   document.body.classList.remove("montage");
-  files = allFiles.slice();
-  shuffle();
+  if (catView){                               // came in from a category
+    files = videosIn(catView);
+    $("#back").classList.add("on");
+  } else {
+    files = allFiles.slice();
+    shuffle();
+  }
   current = 0;
   render();
   feed.scrollTop = 0;
@@ -1454,7 +1617,7 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v53`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v56`;
   paintLike();
   if (montage){
     clearTimeout(mTimer);          // the next clip starts its own five seconds
