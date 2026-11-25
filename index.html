@@ -571,44 +571,72 @@ function shuffled(a){
   return out;
 }
 
-/* "default" — the feed tightens the further you go:
-     1-6     plain
-     7-24    a starred video every third (7, 10, 13, 16, 19, 22), taken from
-             the less-liked ones so the proven favourites survive to 25
-     25-31   every other video is starred with 2+ likes (25, 27, 29, 31)
-     32+     every video is starred with 2+ likes, until they run out
-     after   back to one starred every third, then plain once those are gone
-   Nothing is ever dropped — whatever is left plays out normally. */
+/* "default" — the feed tightens the further you go. Slots are filled from
+   one pool of unplayed videos, so nothing ever repeats even where the rules
+   overlap:
+     1-8          plain
+     9,11…23      from a top-10 category, under 2 likes
+     25,27,29,31  from a top-10 category, 2+ likes
+     32+          every video starred with 2+ likes, until they run out
+     then         every other from a top-10 category
+     finally      plain
+   Even-numbered slots in the alternating stretches are plain. "Plain"
+   prefers uncategorised videos but will take anything unplayed rather than
+   leave a gap, so a heavily-filed library still fills the feed. */
 function orderDefault(){
-  const proven = files.filter(f => f.starred && (counts[f.id] || 0) >= 2);
-  const rest   = files.filter(f => f.starred && (counts[f.id] || 0) < 2);
-  const plain  = files.filter(f => !f.starred);
+  const pool = files.slice();
+  const likesOf = f => counts[f.id] || 0;
+
+  /* Categories ranked by total likes, same as the trophy uses. */
+  const sums = catTotals();
+  const vals = Object.values(sums);
+  const topCats = new Set(Object.keys(sums).filter(
+    name => vals.filter(v => v > sums[name]).length < 10));
+  const inTop = f => (f.cats || (f.cat ? [f.cat] : [])).some(c => topCats.has(c));
+
+  /* Pull one video matching `pred`; `prefer` narrows the choice when it can
+     without making the slot fail. */
+  const take = (pred, prefer) => {
+    let cand = pool.filter(pred);
+    if (!cand.length) return null;
+    if (prefer){
+      const narrowed = cand.filter(prefer);
+      if (narrowed.length) cand = narrowed;
+    }
+    const f = cand[Math.floor(Math.random() * cand.length)];
+    pool.splice(pool.indexOf(f), 1);
+    return f;
+  };
+
+  const anyLeft  = () => take(() => true);
+  const plain    = () => take(f => !inTop(f)) || anyLeft();
+  const catLow   = () => take(f => inTop(f) && likesOf(f) < 2);
+  /* Leave the starred ones for the burst at 32 where possible. */
+  const catHigh  = () => take(f => inTop(f) && likesOf(f) >= 2, f => !f.starred);
+  const starHigh = () => take(f => f.starred && likesOf(f) >= 2);
+  const catAny   = () => take(f => inTop(f));
+
   const out = [];
-  let spent = false, tailFrom = null;
+  let burstDone = false, tailFrom = null;
 
-  while (proven.length || rest.length || plain.length){
+  while (pool.length){
     const pos = out.length + 1;
-    if (pos >= 25 && !proven.length) spent = true;
+    let f = null;
 
-    let want;
-    if (!spent){
-      if (pos <= 6)       want = "plain";
-      else if (pos <= 24) want = (pos - 7) % 3 === 0 ? "starred" : "plain";
-      else if (pos <= 31) want = (pos - 25) % 2 === 0 ? "proven"  : "plain";
-      else                want = "proven";
-    } else {
-      if (tailFrom === null) tailFrom = pos;
-      want = (pos - tailFrom) % 3 === 0 ? "starred" : "plain";
+    if (!burstDone && pos >= 32 && !pool.some(x => x.starred && likesOf(x) >= 2)){
+      burstDone = true;
     }
 
-    let f = null;
-    if (want === "proven")       f = proven.length ? pickFrom(proven) : null;
-    else if (want === "starred") f = rest.length ? pickFrom(rest) : (proven.length ? pickFrom(proven) : null);
-    else                         f = plain.length ? pickFrom(plain) : null;
+    if (burstDone){
+      if (tailFrom === null) tailFrom = pos;
+      f = ((pos - tailFrom) % 2 === 0 ? catAny() : null) || plain();
+    }
+    else if (pos <= 8)   f = plain();
+    else if (pos <= 24)  f = (pos % 2 === 1 ? catLow()  : null) || plain();
+    else if (pos <= 31)  f = (pos % 2 === 1 ? catHigh() : null) || plain();
+    else                 f = starHigh() || plain();
 
-    if (!f) f = plain.length  ? pickFrom(plain)
-          : rest.length    ? pickFrom(rest)
-          : proven.length  ? pickFrom(proven) : null;
+    if (!f) f = anyLeft();
     if (!f) break;
     out.push(f);
   }
@@ -1623,7 +1651,7 @@ function render(){
 }
 
 function updatePos(i){
-  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v58`;
+  $("#pos").textContent = `${Math.min(i + 1, files.length)} / ${files.length} \u00b7 v59`;
   paintLike();
   if (montage){
     clearTimeout(mTimer);          // the next clip starts its own five seconds
